@@ -1,0 +1,12 @@
+name: sql-vm-ha
+metadata:
+  template: sql-vm-ha@0.0.1
+infra:
+  provider: bicep
+  path: infra
+hooks:
+  postprovision:
+    shell: pwsh
+    run: ./hooks/postprovision.ps1
+    interactive: true
+    continueOnError: false

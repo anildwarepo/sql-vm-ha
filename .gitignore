@@ -1,0 +1,5 @@
+# azd environment files
+.azure/
+
+# Secrets
+.env
