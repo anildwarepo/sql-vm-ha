@@ -37,6 +37,12 @@ azd env set AZURE_CLUSTER_BOOTSTRAP_ACCOUNT 'clusteradmin@contoso.local' -e $Env
 azd env set AZURE_SQL_IMAGE_OFFER 'sql2022-ws2022' -e $EnvironmentName
 azd env set AZURE_SQL_IMAGE_SKU 'Enterprise' -e $EnvironmentName
 
+# Detect and set the public IP of this machine for NSG allow-listing
+Write-Host "`n==> Detecting public IP of this machine..." -ForegroundColor Cyan
+$allowedIp = (Invoke-RestMethod -Uri 'https://api.ipify.org?format=text' -UseBasicParsing).Trim()
+Write-Host "    Detected IP: $allowedIp" -ForegroundColor White
+azd env set AZURE_ALLOWED_SOURCE_IP $allowedIp -e $EnvironmentName
+
 # Collect secrets
 Write-Host "`n==> Enter passwords (will be stored in azd environment):" -ForegroundColor Yellow
 
