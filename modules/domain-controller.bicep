@@ -117,7 +117,10 @@ resource cseCreateForest 'Microsoft.Compute/virtualMachines/extensions@2024-07-0
     autoUpgradeMinorVersion: true
     settings: {}
     protectedSettings: {
-      commandToExecute: 'powershell -ExecutionPolicy Unrestricted -Command "$pass = ConvertTo-SecureString -String \'${adminPassword}\' -AsPlainText -Force; Get-Disk | Where-Object PartitionStyle -eq \'RAW\' | Initialize-Disk -PartitionStyle GPT -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume -FileSystem NTFS -NewFileLabel \'ADData\' -Confirm:$false; Install-WindowsFeature AD-Domain-Services,DNS -IncludeManagementTools; Import-Module ADDSDeployment; Install-ADDSForest -DomainName \'${domainFqdn}\' -DomainNetbiosName \'${domainNetBiosName}\' -SafeModeAdministratorPassword $pass -DatabasePath \'F:\\NTDS\' -LogPath \'F:\\NTDS\' -SysvolPath \'F:\\SYSVOL\' -InstallDns -Force -NoRebootOnCompletion; Add-DnsServerForwarder -IPAddress 168.63.129.16; Restart-Computer -Force"' to point to domain controllers ───
+      commandToExecute: 'powershell -ExecutionPolicy Unrestricted -Command "$pass = ConvertTo-SecureString -String \'${adminPassword}\' -AsPlainText -Force; Get-Disk | Where-Object PartitionStyle -eq \'RAW\' | Initialize-Disk -PartitionStyle GPT -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume -FileSystem NTFS -NewFileSystemLabel \'ADData\' -Confirm:$false; Install-WindowsFeature AD-Domain-Services,DNS -IncludeManagementTools; Import-Module ADDSDeployment; Install-ADDSForest -DomainName \'${domainFqdn}\' -DomainNetbiosName \'${domainNetBiosName}\' -SafeModeAdministratorPassword $pass -DatabasePath \'F:\\NTDS\' -LogPath \'F:\\NTDS\' -SysvolPath \'F:\\SYSVOL\' -InstallDns -Force -NoRebootOnCompletion; Add-DnsServerForwarder -IPAddress 168.63.129.16; Restart-Computer -Force"' 
+    }
+  }
+}
 
 module vnetDnsUpdate 'vnet-dns-update.bicep' = {
   params: {
@@ -143,7 +146,7 @@ resource cseReplicaDc 'Microsoft.Compute/virtualMachines/extensions@2024-07-01' 
     autoUpgradeMinorVersion: true
     settings: {}
     protectedSettings: {
-      commandToExecute: 'powershell -ExecutionPolicy Unrestricted -Command "$pass = ConvertTo-SecureString -String \'${adminPassword}\' -AsPlainText -Force; $cred = New-Object System.Management.Automation.PSCredential(\'${domainNetBiosName}\\${adminUsername}\', $pass); Get-Disk | Where-Object PartitionStyle -eq \'RAW\' | Initialize-Disk -PartitionStyle GPT -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume -FileSystem NTFS -NewFileLabel \'ADData\' -Confirm:$false; Install-WindowsFeature AD-Domain-Services,DNS -IncludeManagementTools; Import-Module ADDSDeployment; $maxRetries=30; for($i=0;$i -lt $maxRetries;$i++){try{Install-ADDSDomainController -DomainName \'${domainFqdn}\' -Credential $cred -SafeModeAdministratorPassword $pass -DatabasePath \'F:\\NTDS\' -LogPath \'F:\\NTDS\' -SysvolPath \'F:\\SYSVOL\' -InstallDns -Force -NoRebootOnCompletion; break}catch{Start-Sleep 60}}; Restart-Computer -Force"'
+      commandToExecute: 'powershell -ExecutionPolicy Unrestricted -Command "$pass = ConvertTo-SecureString -String \'${adminPassword}\' -AsPlainText -Force; $cred = New-Object System.Management.Automation.PSCredential(\'${domainNetBiosName}\\${adminUsername}\', $pass); Get-Disk | Where-Object PartitionStyle -eq \'RAW\' | Initialize-Disk -PartitionStyle GPT -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume -FileSystem NTFS -NewFileSystemLabel \'ADData\' -Confirm:$false; Install-WindowsFeature AD-Domain-Services,DNS -IncludeManagementTools; Import-Module ADDSDeployment; $maxRetries=30; for($i=0;$i -lt $maxRetries;$i++){try{Install-ADDSDomainController -DomainName \'${domainFqdn}\' -Credential $cred -SafeModeAdministratorPassword $pass -DatabasePath \'F:\\NTDS\' -LogPath \'F:\\NTDS\' -SysvolPath \'F:\\SYSVOL\' -InstallDns -Force -NoRebootOnCompletion; break}catch{Start-Sleep 60}}; Restart-Computer -Force"'
     }
   }
   dependsOn: [vnetDnsUpdate]
