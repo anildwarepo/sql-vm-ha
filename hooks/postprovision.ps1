@@ -37,13 +37,13 @@ $outputs = az deployment group show `
 
 $cloudWitnessBlobEndpoint = $outputs.cloudWitnessBlobEndpoint.value
 $cloudWitnessName = $outputs.cloudWitnessName.value
-$subnetIdsJson = ($outputs.subnetIds.value | ConvertTo-Json -Compress)
+$subnetIds = @($outputs.subnetIds.value)
 
 # Get cloud witness key
 $cwKey = az storage account keys list --account-name $cloudWitnessName --resource-group $rgName --query '[0].value' -o tsv
 
 Write-Host "  Cloud Witness: $cloudWitnessName" -ForegroundColor Gray
-Write-Host "  Subnets: $subnetIdsJson" -ForegroundColor Gray
+Write-Host "  Subnet count: $($subnetIds.Count)" -ForegroundColor Gray
 
 # --- Wait for DC DNS to be functional ---
 Write-Host "`n==> Waiting for Domain Controller to be ready..." -ForegroundColor Yellow
@@ -93,25 +93,34 @@ Write-Host "`n==> Deploying Phase 2 (Jumpbox + SQL VMs + WSFC + AG)..." -Foregro
 
 $templateFile = Join-Path $PSScriptRoot '..\infra\phase2-sql.bicep'
 
-az deployment group create `
+# Write parameters to a temp file to avoid PowerShell/Windows quote-mangling of JSON values
+$paramsObj = [ordered]@{
+    adminUsername            = @{ value = 'azureadmin' }
+    adminPassword            = @{ value = $adminPassword }
+    domainFqdn               = @{ value = 'contoso.local' }
+    domainNetBiosName        = @{ value = 'CONTOSO' }
+    allowedSourceIp          = @{ value = $allowedIp }
+    cloudWitnessBlobEndpoint = @{ value = $cloudWitnessBlobEndpoint }
+    cloudWitnessPrimaryKey   = @{ value = $cwKey }
+    subnetIds                = @{ value = $subnetIds }
+}
+$paramsFile = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, '.json')
+$paramsObj | ConvertTo-Json -Depth 5 | Set-Content -Path $paramsFile -Encoding utf8
+
+$deployOutput = az deployment group create `
     --resource-group $rgName `
     --template-file $templateFile `
     --name "${envName}-phase2" `
-    --parameters `
-        adminUsername='azureadmin' `
-        adminPassword=$adminPassword `
-        domainFqdn='contoso.local' `
-        domainNetBiosName='CONTOSO' `
-        allowedSourceIp=$allowedIp `
-        cloudWitnessBlobEndpoint=$cloudWitnessBlobEndpoint `
-        cloudWitnessPrimaryKey=$cwKey `
-        subnetIds=$subnetIdsJson `
-    --verbose
+    --parameters "@$paramsFile" 2>&1
 
 if ($LASTEXITCODE -ne 0) {
+    $deployOutput | Out-Host
     Write-Error "Phase 2 deployment failed."
+    Remove-Item -Path $paramsFile -Force -ErrorAction SilentlyContinue
     exit 1
 }
+
+Remove-Item -Path $paramsFile -Force -ErrorAction SilentlyContinue
 
 # --- Show outputs ---
 Write-Host "`n==> Phase 2 deployment succeeded!" -ForegroundColor Green
