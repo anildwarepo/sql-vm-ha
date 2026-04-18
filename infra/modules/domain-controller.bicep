@@ -138,3 +138,4 @@ module vnetDnsUpdate 'vnet-dns-update.bicep' = {
 
 output dcVmId string = dcVm.id
 output dcVmName string = dcVm.name
+output dcPrivateIp string = dcPrivateIp

@@ -7,6 +7,7 @@ param adminPassword string
 
 param domainFqdn string
 param domainNetBiosName string
+param dcPrivateIp string
 param ouPath string
 param vmSize string
 param sqlImageOffer string
@@ -44,6 +45,20 @@ type sqlVmConfig = {
 
 param sqlVms sqlVmConfig[]
 
+var domainJoinUser = '${domainNetBiosName}\\${adminUsername}'
+var domainJoinBaseSettings = {
+  Name: domainFqdn
+  User: domainJoinUser
+  Restart: 'true'
+  Options: 3
+}
+var domainJoinSettings = empty(ouPath)
+  ? domainJoinBaseSettings
+  : union(domainJoinBaseSettings, {
+      OUPath: ouPath
+    })
+var sqlVmImageSku = '${toLower(sqlImageSku)}-gen2'
+
 // ─── SQL VM NICs ───
 
 resource sqlNics 'Microsoft.Network/networkInterfaces@2024-05-01' = [
@@ -51,6 +66,12 @@ resource sqlNics 'Microsoft.Network/networkInterfaces@2024-05-01' = [
     name: 'nic-${toLower(vm.name)}'
     location: location
     properties: {
+      dnsSettings: {
+        dnsServers: [
+          dcPrivateIp
+          '168.63.129.16'
+        ]
+      }
       ipConfigurations: [
         {
           name: 'ipconfig1'
@@ -87,7 +108,7 @@ resource sqlVmResources 'Microsoft.Compute/virtualMachines@2024-07-01' = [
         imageReference: {
           publisher: 'MicrosoftSQLServer'
           offer: sqlImageOffer
-          sku: 'enterprise-gen2'
+          sku: sqlVmImageSku
           version: 'latest'
         }
         osDisk: {
@@ -128,21 +149,21 @@ resource sqlVmResources 'Microsoft.Compute/virtualMachines@2024-07-01' = [
   }
 ]
 
-// ─── Domain Join (Custom Script with retry for DC availability) ───
+// ─── Domain Join (JsonADDomainExtension) ───
 
 resource domainJoin 'Microsoft.Compute/virtualMachines/extensions@2024-07-01' = [
   for (vm, i) in sqlVms: {
     parent: sqlVmResources[i]
-    name: 'JoinDomain'
+    name: 'JoinDomainNative'
     location: location
     properties: {
       publisher: 'Microsoft.Compute'
-      type: 'CustomScriptExtension'
-      typeHandlerVersion: '1.10'
+      type: 'JsonADDomainExtension'
+      typeHandlerVersion: '1.3'
       autoUpgradeMinorVersion: true
-      settings: {}
+      settings: domainJoinSettings
       protectedSettings: {
-        commandToExecute: 'powershell -ExecutionPolicy Unrestricted -Command "$ErrorActionPreference=\'Continue\'; $domain=\'${domainFqdn}\'; $user=\'${domainNetBiosName}\\${adminUsername}\'; $pass=ConvertTo-SecureString \'${adminPassword}\' -AsPlainText -Force; $cred=New-Object PSCredential($user,$pass); $logFile=\'C:\\WindowsAzure\\Logs\\domainjoin.log\'; ipconfig /flushdns 2>&1 | Out-File $logFile -Append; ipconfig /registerdns 2>&1 | Out-File $logFile -Append; nslookup $domain 2>&1 | Out-File $logFile -Append; for($i=0;$i -lt 40;$i++){try{Write-Output \'Attempt $i - joining $domain\' | Out-File $logFile -Append; Add-Computer -DomainName $domain -Credential $cred -Force -ErrorAction Stop; Write-Output \'Join succeeded, restarting\' | Out-File $logFile -Append; Restart-Computer -Force; Start-Sleep 30; exit 0}catch{Write-Output \'Attempt $i failed: $_\' | Out-File $logFile -Append; ipconfig /flushdns 2>&1 | Out-File $logFile -Append; Start-Sleep 90}}; exit 1"'
+        Password: adminPassword
       }
     }
   }

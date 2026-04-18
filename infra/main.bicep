@@ -21,6 +21,7 @@ param domainNetBiosName string = 'CONTOSO'
 
 var vnetName = 'vnet-sql-ha'
 var vnetAddressPrefix = '10.38.0.0/16'
+var dcPrivateIp = '10.38.0.4'
 
 var subnets = [
   { name: 'DC-Subnet', addressPrefix: '10.38.0.0/24' }
@@ -55,6 +56,7 @@ resource cloudWitness 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     supportsHttpsTrafficOnly: true
     minimumTlsVersion: 'TLS1_2'
     allowBlobPublicAccess: false
+    allowSharedKeyAccess: true
   }
 }
 
@@ -72,7 +74,7 @@ module domainControllers 'modules/domain-controller.bicep' = {
     vnetAddressPrefix: vnetAddressPrefix
     dcSubnetId: network.outputs.subnetIds[0]
     dcVmName: 'DC-VM-1'
-    dcPrivateIp: '10.38.0.4'
+    dcPrivateIp: dcPrivateIp
     dcZone: '1'
     subnetsConfig: [
       { name: subnets[0].name, addressPrefix: subnets[0].addressPrefix, nsgId: network.outputs.nsgDcId }
@@ -92,6 +94,7 @@ output vnetName string = network.outputs.vnetName
 output cloudWitnessName string = cloudWitness.name
 output cloudWitnessBlobEndpoint string = cloudWitness.properties.primaryEndpoints.blob
 output dcVmName string = domainControllers.outputs.dcVmName
+output dcPrivateIp string = dcPrivateIp
 output subnetIds string[] = network.outputs.subnetIds
 output nsgDcId string = network.outputs.nsgDcId
 output nsgSql1Id string = network.outputs.nsgSql1Id

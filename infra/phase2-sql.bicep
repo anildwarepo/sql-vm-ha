@@ -23,11 +23,23 @@ param ouPath string = ''
 @description('SQL service account (UPN format)')
 param sqlServiceAccount string = 'sqlservice@contoso.local'
 
+@secure()
+@description('SQL service account password')
+param sqlServiceAccountPassword string
+
 @description('Cluster operator account (UPN format)')
 param clusterOperatorAccount string = 'clusteradmin@contoso.local'
 
+@secure()
+@description('Cluster operator account password')
+param clusterOperatorAccountPassword string
+
 @description('Cluster bootstrap account (UPN format)')
 param clusterBootstrapAccount string = 'clusteradmin@contoso.local'
+
+@secure()
+@description('Cluster bootstrap account password')
+param clusterBootstrapAccountPassword string
 
 param sqlImageOffer string = 'sql2022-ws2022'
 
@@ -43,6 +55,9 @@ param cloudWitnessBlobEndpoint string
 @secure()
 @description('Cloud witness storage key')
 param cloudWitnessPrimaryKey string
+
+@description('DC private IP address from Phase 1')
+param dcPrivateIp string
 
 @description('Subnet IDs from Phase 1 [DC, SQL-1, SQL-2, Jumpbox]')
 param subnetIds string[]
@@ -77,16 +92,17 @@ module sqlServers 'modules/sql-vm.bicep' = {
     adminPassword: adminPassword
     domainFqdn: domainFqdn
     domainNetBiosName: domainNetBiosName
+    dcPrivateIp: dcPrivateIp
     ouPath: ouPath
     vmSize: sqlVmSize
     sqlImageOffer: sqlImageOffer
     sqlImageSku: sqlImageSku
     sqlServiceAccount: sqlServiceAccount
-    sqlServiceAccountPassword: adminPassword
+    sqlServiceAccountPassword: sqlServiceAccountPassword
     clusterOperatorAccount: clusterOperatorAccount
-    clusterOperatorAccountPassword: adminPassword
+    clusterOperatorAccountPassword: clusterOperatorAccountPassword
     clusterBootstrapAccount: clusterBootstrapAccount
-    clusterBootstrapAccountPassword: adminPassword
+    clusterBootstrapAccountPassword: clusterBootstrapAccountPassword
     cloudWitnessBlobEndpoint: cloudWitnessBlobEndpoint
     cloudWitnessPrimaryKey: cloudWitnessPrimaryKey
     sqlSubnetIds: [subnetIds[1], subnetIds[2]]
