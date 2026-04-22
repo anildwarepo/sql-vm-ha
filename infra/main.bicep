@@ -1,4 +1,4 @@
-// Phase 1: Network + Domain Controllers + Cloud Witness
+// Phase 1: Network + Domain Controllers
 // SQL VMs and Jumpbox are deployed in Phase 2 (postprovision hook)
 
 @description('Azure region for all resources')
@@ -43,23 +43,6 @@ module network 'modules/network.bicep' = {
   }
 }
 
-// --- Cloud Witness Storage Account ---
-
-resource cloudWitness 'Microsoft.Storage/storageAccounts@2023-05-01' = {
-  name: 'stcw${uniqueString(resourceGroup().id)}'
-  location: location
-  sku: {
-    name: 'Standard_LRS'
-  }
-  kind: 'StorageV2'
-  properties: {
-    supportsHttpsTrafficOnly: true
-    minimumTlsVersion: 'TLS1_2'
-    allowBlobPublicAccess: false
-    allowSharedKeyAccess: true
-  }
-}
-
 // --- Module 2: Domain Controllers + AD Forest + DNS ---
 
 module domainControllers 'modules/domain-controller.bicep' = {
@@ -91,8 +74,6 @@ module domainControllers 'modules/domain-controller.bicep' = {
 
 output vnetId string = network.outputs.vnetId
 output vnetName string = network.outputs.vnetName
-output cloudWitnessName string = cloudWitness.name
-output cloudWitnessBlobEndpoint string = cloudWitness.properties.primaryEndpoints.blob
 output dcVmName string = domainControllers.outputs.dcVmName
 output dcPrivateIp string = dcPrivateIp
 output subnetIds string[] = network.outputs.subnetIds

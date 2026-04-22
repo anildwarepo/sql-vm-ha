@@ -25,11 +25,6 @@ param clusterBootstrapAccount string
 @secure()
 param clusterBootstrapAccountPassword string
 
-// Cloud witness
-param cloudWitnessBlobEndpoint string
-@secure()
-param cloudWitnessPrimaryKey string
-
 // Networking
 param sqlSubnetIds string[]
 
@@ -163,8 +158,6 @@ resource sqlVmGroup 'Microsoft.SqlVirtualMachine/sqlVirtualMachineGroups@2023-10
       clusterOperatorAccount: clusterOperatorAccount
       clusterSubnetType: 'MultiSubnet'
       sqlServiceAccount: sqlServiceAccount
-      storageAccountUrl: cloudWitnessBlobEndpoint
-      storageAccountPrimaryKey: cloudWitnessPrimaryKey
     }
   }
 }

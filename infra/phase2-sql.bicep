@@ -1,5 +1,5 @@
-// Phase 2: Jumpbox + SQL VMs + WSFC + AG
-// Deployed by postprovision hook after DCs are confirmed running
+// Phase 2: Jumpbox + SQL VMs (domain-joined, standalone IaaS Agent)
+// WSFC cluster, AG, and listener are configured by postprovision script
 
 @description('Azure region')
 param location string = resourceGroup().location
@@ -17,29 +17,8 @@ param domainFqdn string = 'contoso.local'
 @description('AD domain NetBIOS name')
 param domainNetBiosName string = 'CONTOSO'
 
-@description('OU path for WSFC cluster objects')
+@description('OU path for domain join')
 param ouPath string = ''
-
-@description('SQL service account (UPN format)')
-param sqlServiceAccount string = 'sqlservice@contoso.local'
-
-@secure()
-@description('SQL service account password')
-param sqlServiceAccountPassword string
-
-@description('Cluster operator account (UPN format)')
-param clusterOperatorAccount string = 'clusteradmin@contoso.local'
-
-@secure()
-@description('Cluster operator account password')
-param clusterOperatorAccountPassword string
-
-@description('Cluster bootstrap account (UPN format)')
-param clusterBootstrapAccount string = 'clusteradmin@contoso.local'
-
-@secure()
-@description('Cluster bootstrap account password')
-param clusterBootstrapAccountPassword string
 
 param sqlImageOffer string = 'sql2022-ws2022'
 
@@ -48,13 +27,6 @@ param sqlImageSku string = 'Enterprise'
 
 @description('Your public IP for jump box RDP access')
 param allowedSourceIp string
-
-@description('Cloud witness blob endpoint from Phase 1')
-param cloudWitnessBlobEndpoint string
-
-@secure()
-@description('Cloud witness storage key')
-param cloudWitnessPrimaryKey string
 
 @description('DC private IP address from Phase 1')
 param dcPrivateIp string
@@ -83,7 +55,7 @@ module jumpbox 'modules/jumpbox.bicep' = {
   }
 }
 
-// --- SQL VMs + WSFC + AG ---
+// --- SQL VMs (standalone – WSFC/AG configured post-deploy) ---
 
 module sqlServers 'modules/sql-vm.bicep' = {
   params: {
@@ -97,14 +69,6 @@ module sqlServers 'modules/sql-vm.bicep' = {
     vmSize: sqlVmSize
     sqlImageOffer: sqlImageOffer
     sqlImageSku: sqlImageSku
-    sqlServiceAccount: sqlServiceAccount
-    sqlServiceAccountPassword: sqlServiceAccountPassword
-    clusterOperatorAccount: clusterOperatorAccount
-    clusterOperatorAccountPassword: clusterOperatorAccountPassword
-    clusterBootstrapAccount: clusterBootstrapAccount
-    clusterBootstrapAccountPassword: clusterBootstrapAccountPassword
-    cloudWitnessBlobEndpoint: cloudWitnessBlobEndpoint
-    cloudWitnessPrimaryKey: cloudWitnessPrimaryKey
     sqlSubnetIds: [subnetIds[1], subnetIds[2]]
     sqlVms: sqlVms
   }
@@ -114,5 +78,3 @@ module sqlServers 'modules/sql-vm.bicep' = {
 
 output jumpboxPublicIp string = jumpbox.outputs.jumpboxPublicIp
 output sqlVmNames string[] = sqlServers.outputs.sqlVmNames
-output sqlVmGroupName string = sqlServers.outputs.sqlVmGroupName
-output agListenerName string = sqlServers.outputs.agListenerName

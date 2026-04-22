@@ -1,4 +1,4 @@
-// Module: SQL Server VMs, domain join, SQL IaaS Agent, WSFC Group, AG Listener
+// Module: SQL Server VMs, domain join, SQL IaaS Agent (standalone)
 param location string
 param adminUsername string
 
@@ -14,22 +14,6 @@ param sqlImageOffer string
 
 @allowed(['Enterprise', 'Developer', 'Standard'])
 param sqlImageSku string
-
-// Service accounts (UPN format)
-param sqlServiceAccount string
-@secure()
-param sqlServiceAccountPassword string
-param clusterOperatorAccount string
-@secure()
-param clusterOperatorAccountPassword string
-param clusterBootstrapAccount string
-@secure()
-param clusterBootstrapAccountPassword string
-
-// Cloud witness
-param cloudWitnessBlobEndpoint string
-@secure()
-param cloudWitnessPrimaryKey string
 
 // Networking
 param sqlSubnetIds string[]
@@ -169,100 +153,7 @@ resource domainJoin 'Microsoft.Compute/virtualMachines/extensions@2024-07-01' = 
   }
 ]
 
-// ─── SQL VM Group (WSFC + AG) ───
-
-resource sqlVmGroup 'Microsoft.SqlVirtualMachine/sqlVirtualMachineGroups@2023-10-01' = {
-  name: 'sqlvmgroup-ag'
-  location: location
-  properties: {
-    sqlImageOffer: sqlImageOffer
-    sqlImageSku: sqlImageSku
-    wsfcDomainProfile: {
-      domainFqdn: domainFqdn
-      ouPath: ouPath
-      clusterBootstrapAccount: clusterBootstrapAccount
-      clusterOperatorAccount: clusterOperatorAccount
-      clusterSubnetType: 'MultiSubnet'
-      sqlServiceAccount: sqlServiceAccount
-      storageAccountUrl: cloudWitnessBlobEndpoint
-      storageAccountPrimaryKey: cloudWitnessPrimaryKey
-    }
-  }
-}
-
-// ─── SQL IaaS Agent Extensions ───
-
-resource sqlIaasAgent 'Microsoft.SqlVirtualMachine/sqlVirtualMachines@2023-10-01' = [
-  for (vm, i) in sqlVms: {
-    name: vm.name
-    location: location
-    properties: {
-      virtualMachineResourceId: sqlVmResources[i].id
-      sqlServerLicenseType: 'PAYG'
-      sqlImageSku: sqlImageSku
-      sqlVirtualMachineGroupResourceId: sqlVmGroup.id
-      wsfcDomainCredentials: {
-        clusterBootstrapAccountPassword: clusterBootstrapAccountPassword
-        clusterOperatorAccountPassword: clusterOperatorAccountPassword
-        sqlServiceAccountPassword: sqlServiceAccountPassword
-      }
-      wsfcStaticIp: vm.clusterIp
-      storageConfigurationSettings: {
-        diskConfigurationType: 'NEW'
-        storageWorkloadType: 'OLTP'
-        sqlDataSettings: {
-          luns: [0]
-          defaultFilePath: 'F:\\SQLData'
-        }
-        sqlLogSettings: {
-          luns: [1]
-          defaultFilePath: 'G:\\SQLLog'
-        }
-      }
-    }
-    dependsOn: [domainJoin]
-  }
-]
-
-// ─── Availability Group Listener (multi-subnet) ───
-
-resource agListener 'Microsoft.SqlVirtualMachine/sqlVirtualMachineGroups/availabilityGroupListeners@2023-10-01' = {
-  parent: sqlVmGroup
-  name: 'ag-listener'
-  properties: {
-    availabilityGroupName: 'ag-sql-ha'
-    port: 1433
-    availabilityGroupConfiguration: {
-      replicas: [
-        {
-          sqlVirtualMachineInstanceId: sqlIaasAgent[0].id
-          role: 'Primary'
-          commit: 'Synchronous_Commit'
-          failover: 'Automatic'
-          readableSecondary: 'No'
-        }
-        {
-          sqlVirtualMachineInstanceId: sqlIaasAgent[1].id
-          role: 'Secondary'
-          commit: 'Synchronous_Commit'
-          failover: 'Automatic'
-          readableSecondary: 'All'
-        }
-      ]
-    }
-    multiSubnetIpConfigurations: [
-      for (vm, i) in sqlVms: {
-        sqlVirtualMachineInstance: sqlIaasAgent[i].id
-        privateIpAddress: {
-          ipAddress: vm.listenerIp
-          subnetResourceId: sqlSubnetIds[vm.subnetIndex]
-        }
-      }
-    ]
-  }
-}
+// SQL IaaS Agent is registered via postprovision script (after WSFC/AG setup)
 
 output sqlVmIds string[] = [for (vm, i) in sqlVms: sqlVmResources[i].id]
 output sqlVmNames string[] = [for (vm, i) in sqlVms: sqlVmResources[i].name]
-output sqlVmGroupName string = sqlVmGroup.name
-output agListenerName string = agListener.name

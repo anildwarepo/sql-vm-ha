@@ -83,22 +83,6 @@ module network 'modules/network.bicep' = {
   }
 }
 
-// --- Cloud Witness Storage Account ---
-
-resource cloudWitness 'Microsoft.Storage/storageAccounts@2023-05-01' = {
-  name: 'stcw${uniqueString(resourceGroup().id)}'
-  location: location
-  sku: {
-    name: 'Standard_LRS'
-  }
-  kind: 'StorageV2'
-  properties: {
-    supportsHttpsTrafficOnly: true
-    minimumTlsVersion: 'TLS1_2'
-    allowBlobPublicAccess: false
-  }
-}
-
 // --- Module 2: Domain Controllers + AD Forest ---
 
 module domainControllers 'modules/domain-controller.bicep' = {
@@ -140,8 +124,6 @@ module sqlServers 'modules/sql-vm.bicep' = {
     clusterOperatorAccountPassword: clusterOperatorAccountPassword
     clusterBootstrapAccount: clusterBootstrapAccount
     clusterBootstrapAccountPassword: clusterBootstrapAccountPassword
-    cloudWitnessBlobEndpoint: cloudWitness.properties.primaryEndpoints.blob
-    cloudWitnessPrimaryKey: cloudWitness.listKeys().keys[0].value
     sqlSubnetIds: [network.outputs.subnetIds[1], network.outputs.subnetIds[2]]
     sqlVms: sqlVms
   }
@@ -151,7 +133,6 @@ module sqlServers 'modules/sql-vm.bicep' = {
 // --- Outputs ---
 
 output vnetId string = network.outputs.vnetId
-output cloudWitnessName string = cloudWitness.name
 output dcVmNames string[] = domainControllers.outputs.dcVmNames
 output sqlVmNames string[] = sqlServers.outputs.sqlVmNames
 output sqlVmGroupName string = sqlServers.outputs.sqlVmGroupName

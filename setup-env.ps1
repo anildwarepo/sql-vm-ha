@@ -68,9 +68,12 @@ if (-not (Get-Command azd -ErrorAction SilentlyContinue)) {
 }
 
 Write-Host "==> Initializing azd environment '$EnvironmentName'..." -ForegroundColor Cyan
+$ErrorActionPreference = 'Continue'
 azd env new $EnvironmentName 2>$null
+$ErrorActionPreference = 'Stop'
 
 # Non-secret defaults
+$ErrorActionPreference = 'Continue'
 azd env set AZURE_ADMIN_USERNAME 'azureadmin' -e $EnvironmentName
 azd env set AZURE_DOMAIN_FQDN 'contoso.local' -e $EnvironmentName
 azd env set AZURE_DOMAIN_NETBIOS 'CONTOSO' -e $EnvironmentName
@@ -86,22 +89,27 @@ $detectedIp = Get-PublicIpAddress
 $allowedIp = ConvertTo-CidrSingleHost -IpOrCidr $detectedIp
 Write-Host "    Detected IP/CIDR: $allowedIp" -ForegroundColor White
 azd env set AZURE_ALLOWED_SOURCE_IP $allowedIp -e $EnvironmentName
+$ErrorActionPreference = 'Stop'
 
 # Collect secrets
 Write-Host "`n==> Enter passwords (will be stored in azd environment):" -ForegroundColor Yellow
 
 $adminPass = Read-Host -Prompt 'VM Admin password' -AsSecureString
 $adminPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($adminPass))
+$ErrorActionPreference = 'Continue'
 azd env set AZURE_ADMIN_PASSWORD $adminPlain -e $EnvironmentName
+$ErrorActionPreference = 'Stop'
 
 $sqlSvcPass = Read-Host -Prompt 'SQL Service account password' -AsSecureString
 $sqlSvcPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sqlSvcPass))
+$ErrorActionPreference = 'Continue'
 azd env set AZURE_SQL_SERVICE_PASSWORD $sqlSvcPlain -e $EnvironmentName
 
 $clusterOpPass = Read-Host -Prompt 'Cluster operator password' -AsSecureString
 $clusterOpPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($clusterOpPass))
 azd env set AZURE_CLUSTER_OPERATOR_PASSWORD $clusterOpPlain -e $EnvironmentName
 azd env set AZURE_CLUSTER_BOOTSTRAP_PASSWORD $clusterOpPlain -e $EnvironmentName
+$ErrorActionPreference = 'Stop'
 
 Write-Host "`n==> Environment '$EnvironmentName' configured. Deploy with:" -ForegroundColor Green
 Write-Host "    azd up -e $EnvironmentName" -ForegroundColor White
