@@ -20,7 +20,6 @@ param sqlSubnetIds string[]
 
 type sqlVmConfig = {
   name: string
-  zone: string
   subnetIndex: int
   privateIpAddress: string
   clusterIp: string
@@ -28,6 +27,18 @@ type sqlVmConfig = {
 }
 
 param sqlVms sqlVmConfig[]
+
+resource sqlAvailabilitySet 'Microsoft.Compute/availabilitySets@2024-07-01' = {
+  name: 'avset-sql-ha'
+  location: location
+  sku: {
+    name: 'Aligned'
+  }
+  properties: {
+    platformFaultDomainCount: 2
+    platformUpdateDomainCount: 5
+  }
+}
 
 var domainJoinUser = '${domainNetBiosName}\\${adminUsername}'
 var domainJoinBaseSettings = {
@@ -60,8 +71,31 @@ resource sqlNics 'Microsoft.Network/networkInterfaces@2024-05-01' = [
         {
           name: 'ipconfig1'
           properties: {
+            primary: true
             privateIPAllocationMethod: 'Static'
             privateIPAddress: vm.privateIpAddress
+            subnet: {
+              id: sqlSubnetIds[vm.subnetIndex]
+            }
+          }
+        }
+        {
+          name: 'ipconfig-cluster'
+          properties: {
+            primary: false
+            privateIPAllocationMethod: 'Static'
+            privateIPAddress: vm.clusterIp
+            subnet: {
+              id: sqlSubnetIds[vm.subnetIndex]
+            }
+          }
+        }
+        {
+          name: 'ipconfig-listener'
+          properties: {
+            primary: false
+            privateIPAllocationMethod: 'Static'
+            privateIPAddress: vm.listenerIp
             subnet: {
               id: sqlSubnetIds[vm.subnetIndex]
             }
@@ -78,8 +112,10 @@ resource sqlVmResources 'Microsoft.Compute/virtualMachines@2024-07-01' = [
   for (vm, i) in sqlVms: {
     name: vm.name
     location: location
-    zones: [vm.zone]
     properties: {
+      availabilitySet: {
+        id: sqlAvailabilitySet.id
+      }
       hardwareProfile: {
         vmSize: vmSize
       }

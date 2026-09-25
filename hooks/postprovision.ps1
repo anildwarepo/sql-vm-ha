@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Post-provision hook: waits for DCs to be ready, then deploys Phase 2 (Jumpbox + SQL VMs).
+    Post-provision hook: waits for the DC to be ready, then deploys and configures the SQL VMs.
 
 #>
 
@@ -17,12 +17,12 @@ $rgName = "$(azd env get-value AZURE_RESOURCE_GROUP 2>$null)".Trim()
 $domainFQDN = "$(azd env get-value AZURE_DOMAIN_FQDN 2>$null)".Trim()
 $envName = "$(azd env get-value AZURE_ENV_NAME 2>$null)".Trim()
 $domainNetBiosName = "$(azd env get-value AZURE_DOMAIN_NETBIOS 2>$null)".Trim()
-$allowedIp = "$(azd env get-value AZURE_ALLOWED_SOURCE_IP 2>$null)".Trim()
+$location = "$(azd env get-value AZURE_LOCATION 2>$null)".Trim()
 $dcVmName = "$(azd env get-value dcVmName 2>$null)".Trim()
 $ErrorActionPreference = 'Stop'
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "Phase 2: Jumpbox + SQL VMs Deployment" -ForegroundColor Cyan
+Write-Host "Phase 2: SQL VMs Deployment" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 # --- Get Phase 1 outputs ---
@@ -47,8 +47,18 @@ $outputs = az deployment group show `
 
 $dcPrivateIp = $outputs.dcPrivateIp.value
 $subnetIds = @($outputs.subnetIds.value)
+$sqlPrivateIps = @($outputs.sqlPrivateIps.value)
+$clusterIps = @($outputs.clusterIps.value)
+$listenerIps = @($outputs.listenerIps.value)
+$vpnClientAddressPrefix = $outputs.vpnClientAddressPrefix.value
 
-if ([string]::IsNullOrWhiteSpace($dcPrivateIp) -or $subnetIds.Count -lt 4) {
+if ([string]::IsNullOrWhiteSpace($dcPrivateIp) -or
+    [string]::IsNullOrWhiteSpace($location) -or
+    $subnetIds.Count -ne 3 -or
+    $sqlPrivateIps.Count -ne 2 -or
+    $clusterIps.Count -ne 2 -or
+    $listenerIps.Count -ne 2 -or
+    [string]::IsNullOrWhiteSpace($vpnClientAddressPrefix)) {
     Write-Error "Phase 1 outputs are missing or incomplete."
     exit 1
 }
@@ -101,14 +111,23 @@ $adminUsername = "$(azd env get-value AZURE_ADMIN_USERNAME 2>$null)".Trim()
 $adminPassword = "$(azd env get-value AZURE_ADMIN_PASSWORD 2>$null)".Trim()
 $sqlServiceAccount = "$(azd env get-value AZURE_SQL_SERVICE_ACCOUNT 2>$null)".Trim()
 $sqlServiceAccountPassword = "$(azd env get-value AZURE_SQL_SERVICE_PASSWORD 2>$null)".Trim()
+$sqlAdminLogin = "$(azd env get-value AZURE_SQL_ADMIN_LOGIN 2>$null)".Trim()
+$sqlAdminPassword = "$(azd env get-value AZURE_SQL_ADMIN_PASSWORD 2>$null)".Trim()
 $clusterOperatorAccount = "$(azd env get-value AZURE_CLUSTER_OPERATOR_ACCOUNT 2>$null)".Trim()
 $clusterOperatorAccountPassword = "$(azd env get-value AZURE_CLUSTER_OPERATOR_PASSWORD 2>$null)".Trim()
 $clusterBootstrapAccount = "$(azd env get-value AZURE_CLUSTER_BOOTSTRAP_ACCOUNT 2>$null)".Trim()
 $clusterBootstrapAccountPassword = "$(azd env get-value AZURE_CLUSTER_BOOTSTRAP_PASSWORD 2>$null)".Trim()
 $ErrorActionPreference = 'Stop'
 
-if ([string]::IsNullOrWhiteSpace($sqlServiceAccount) -or [string]::IsNullOrWhiteSpace($sqlServiceAccountPassword)) {
+if ([string]::IsNullOrWhiteSpace($sqlServiceAccount) -or
+    [string]::IsNullOrWhiteSpace($sqlServiceAccountPassword) -or
+    [string]::IsNullOrWhiteSpace($sqlAdminLogin) -or
+    [string]::IsNullOrWhiteSpace($sqlAdminPassword)) {
     Write-Error "Required account credentials missing from azd env. Re-run setup-env.ps1."
+    exit 1
+}
+if ($sqlAdminLogin -notmatch '^[A-Za-z][A-Za-z0-9_.-]{0,127}$') {
+    Write-Error "AZURE_SQL_ADMIN_LOGIN contains unsupported characters."
     exit 1
 }
 
@@ -212,7 +231,7 @@ for ($i = 1; $i -le $maxWait; $i++) {
 az vm run-command delete --resource-group $rgName --vm-name $dcVmName --run-command-name 'CreateADAccounts' --yes 2>$null | Out-Null
 
 # --- Deploy Phase 2 ---
-Write-Host "`n==> Deploying Phase 2 (Jumpbox + SQL VMs + WSFC + AG)..." -ForegroundColor Cyan
+Write-Host "`n==> Deploying Phase 2 (SQL VMs + WSFC + AG)..." -ForegroundColor Cyan
 
 $templateFile = Join-Path $PSScriptRoot '..\infra\phase2-sql.bicep'
 $phase2DeploymentName = "${envName}-phase2-$(Get-Date -Format 'yyyyMMddHHmmss')"
@@ -226,9 +245,11 @@ $paramsObj = [ordered]@{
         adminPassword            = @{ value = $adminPassword }
         domainFqdn               = @{ value = $domainFqdn }
         domainNetBiosName        = @{ value = $domainNetBiosName }
-        allowedSourceIp          = @{ value = $allowedIp }
         dcPrivateIp              = @{ value = $dcPrivateIp }
         subnetIds                = @{ value = $subnetIds }
+        sqlPrivateIps            = @{ value = $sqlPrivateIps }
+        clusterIps               = @{ value = $clusterIps }
+        listenerIps              = @{ value = $listenerIps }
     }
 }
 $paramsFile = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, '.json')
@@ -349,6 +370,8 @@ param(
     [string]$DomainPassword,
     [string]$SqlSvcAccount,
     [string]$SqlSvcPassword,
+    [string]$SqlAdminLogin,
+    [string]$SqlAdminPassword,
     [string]$AGName,
     [string]$ListenerName,
     [string]$ListenerIp1,
@@ -369,6 +392,24 @@ Invoke-Command -ComputerName $Node1 -Credential $domainCred -ScriptBlock {
 } -ErrorAction Stop
 Invoke-Command -ComputerName $Node2 -Credential $domainCred -ScriptBlock {
     Install-WindowsFeature -Name Failover-Clustering -IncludeManagementTools -ErrorAction Stop | Out-Null
+} -ErrorAction Stop
+
+# Permit SQL client, listener, HADR, and WSFC traffic on both replicas.
+Invoke-Command -ComputerName @($Node1, $Node2) -Credential $domainCred -ScriptBlock {
+    $rules = @(
+        @{ Name = 'ALLOW_SQL_1433'; DisplayName = 'Allow SQL Server 1433'; Protocol = 'TCP'; LocalPort = '1433' },
+        @{ Name = 'ALLOW_SQL_LISTENER_14333'; DisplayName = 'Allow SQL AG Listener 14333'; Protocol = 'TCP'; LocalPort = '14333' },
+        @{ Name = 'ALLOW_HADR_5022'; DisplayName = 'Allow SQL HADR 5022'; Protocol = 'TCP'; LocalPort = '5022' },
+        @{ Name = 'ALLOW_WSFC_TCP'; DisplayName = 'Allow WSFC TCP'; Protocol = 'TCP'; LocalPort = '3343' },
+        @{ Name = 'ALLOW_WSFC_UDP'; DisplayName = 'Allow WSFC UDP'; Protocol = 'UDP'; LocalPort = '3343' }
+    )
+    foreach ($rule in $rules) {
+        if (-not (Get-NetFirewallRule -Name $rule.Name -ErrorAction SilentlyContinue)) {
+            New-NetFirewallRule -Name $rule.Name -DisplayName $rule.DisplayName `
+                -Direction Inbound -Protocol $rule.Protocol -LocalPort $rule.LocalPort `
+                -RemoteAddress Any -Action Allow -ErrorAction Stop | Out-Null
+        }
+    }
 } -ErrorAction Stop
 
 # 1b) Enable CredSSP to avoid Kerberos double-hop issues with New-Cluster
@@ -496,28 +537,78 @@ Invoke-Command -ComputerName $Node2 -Credential $domainCred -ScriptBlock {
 } -ErrorAction Stop
 Write-Output "Node2 SQL sysadmin bootstrapped."
 
+# 5b) Enable mixed-mode authentication and create a failover-safe SQL login on both replicas.
+$escapedSqlAdminLogin = $SqlAdminLogin.Replace(']', ']]')
+$escapedSqlAdminPassword = $SqlAdminPassword.Replace("'", "''")
+$instanceName = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL' -Name MSSQLSERVER).MSSQLSERVER
+$loginModePath = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instanceName\MSSQLServer"
+Set-ItemProperty -Path $loginModePath -Name LoginMode -Value 2 -ErrorAction Stop
+Invoke-Command -ComputerName $Node2 -Credential $domainCred -ScriptBlock {
+    $instanceName = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL' -Name MSSQLSERVER).MSSQLSERVER
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$instanceName\MSSQLServer" -Name LoginMode -Value 2 -ErrorAction Stop
+} -ErrorAction Stop
+
+Invoke-Sqlcmd -ServerInstance $Node1 -Query @"
+IF NOT EXISTS (SELECT 1 FROM sys.sql_logins WHERE name = N'$escapedSqlAdminLogin')
+    CREATE LOGIN [$escapedSqlAdminLogin] WITH PASSWORD = N'$escapedSqlAdminPassword', CHECK_POLICY = ON, CHECK_EXPIRATION = OFF;
+ELSE
+    ALTER LOGIN [$escapedSqlAdminLogin] WITH PASSWORD = N'$escapedSqlAdminPassword';
+ALTER SERVER ROLE [sysadmin] ADD MEMBER [$escapedSqlAdminLogin];
+"@ -ErrorAction Stop
+
+$sqlAdminSid = (Invoke-Sqlcmd -ServerInstance $Node1 -Query "SELECT CONVERT(varchar(170), sid, 1) AS Sid FROM sys.sql_logins WHERE name = N'$escapedSqlAdminLogin';" -ErrorAction Stop).Sid
+Invoke-Command -ComputerName $Node2 -Credential $domainCred -ScriptBlock {
+    $login = $using:escapedSqlAdminLogin
+    $password = $using:escapedSqlAdminPassword
+    $sid = $using:sqlAdminSid
+    Invoke-Sqlcmd -ServerInstance $using:Node2 -Query @"
+IF NOT EXISTS (SELECT 1 FROM sys.sql_logins WHERE name = N'$login')
+    CREATE LOGIN [$login] WITH PASSWORD = N'$password', SID = $sid, CHECK_POLICY = ON, CHECK_EXPIRATION = OFF;
+ELSE
+    ALTER LOGIN [$login] WITH PASSWORD = N'$password';
+ALTER SERVER ROLE [sysadmin] ADD MEMBER [$login];
+"@ -ErrorAction Stop
+} -ErrorAction Stop
+
+Invoke-Command -ComputerName $Node2 -Credential $domainCred -ScriptBlock {
+    Restart-Service MSSQLSERVER -Force -ErrorAction Stop
+    Start-Sleep 15
+} -ErrorAction Stop
+Restart-Service MSSQLSERVER -Force -ErrorAction Stop
+Start-Sleep 15
+
 # 6) Create AG endpoints and AG
 Write-Output "Creating AG endpoints and availability group..."
+$domainNetBios = $DomainUser.Split('\')[0]
+$node1MachineAccount = "$domainNetBios\$Node1`$"
+$node2MachineAccount = "$domainNetBios\$Node2`$"
 
 # Node1 endpoint (SYSTEM is now sysadmin)
 Invoke-Sqlcmd -ServerInstance $Node1 -Query @"
 IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = '$SqlSvcAccount')
     CREATE LOGIN [$SqlSvcAccount] FROM WINDOWS;
+IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = '$node2MachineAccount')
+    CREATE LOGIN [$node2MachineAccount] FROM WINDOWS;
 IF NOT EXISTS (SELECT 1 FROM sys.endpoints WHERE name = 'Hadr_endpoint')
     CREATE ENDPOINT [Hadr_endpoint] STATE = STARTED
         AS TCP (LISTENER_PORT = 5022)
         FOR DATABASE_MIRRORING (ROLE = ALL, AUTHENTICATION = WINDOWS NEGOTIATE, ENCRYPTION = REQUIRED ALGORITHM AES);
 GRANT CONNECT ON ENDPOINT::[Hadr_endpoint] TO [$SqlSvcAccount];
+GRANT CONNECT ON ENDPOINT::[Hadr_endpoint] TO [$node2MachineAccount];
 "@ -ErrorAction Stop
 
 # Node2 endpoint (domain admin is now sysadmin)
 Invoke-Command -ComputerName $Node2 -Credential $domainCred -ScriptBlock {
+    $node1MachineAccount = $using:node1MachineAccount
     Invoke-Sqlcmd -ServerInstance $using:Node2 -Query @"
+IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = '$node1MachineAccount')
+    CREATE LOGIN [$node1MachineAccount] FROM WINDOWS;
 IF NOT EXISTS (SELECT 1 FROM sys.endpoints WHERE name = 'Hadr_endpoint')
     CREATE ENDPOINT [Hadr_endpoint] STATE = STARTED
         AS TCP (LISTENER_PORT = 5022)
         FOR DATABASE_MIRRORING (ROLE = ALL, AUTHENTICATION = WINDOWS NEGOTIATE, ENCRYPTION = REQUIRED ALGORITHM AES);
 GRANT CONNECT ON ENDPOINT::[Hadr_endpoint] TO [$($using:SqlSvcAccount)];
+GRANT CONNECT ON ENDPOINT::[Hadr_endpoint] TO [$node1MachineAccount];
 "@ -ErrorAction Stop
 } -ErrorAction Stop
 
@@ -534,14 +625,16 @@ IF NOT EXISTS (SELECT 1 FROM sys.availability_groups WHERE name = '$AGName')
 
 # Join secondary to AG (domain admin is now sysadmin on Node2)
 Invoke-Command -ComputerName $Node2 -Credential $domainCred -ScriptBlock {
-    Invoke-Sqlcmd -ServerInstance $using:Node2 -Query "ALTER AVAILABILITY GROUP [$($using:AGName)] JOIN;" -ErrorAction Stop
-    Invoke-Sqlcmd -ServerInstance $using:Node2 -Query "ALTER AVAILABILITY GROUP [$($using:AGName)] GRANT CREATE ANY DATABASE;" -ErrorAction Stop
+    Invoke-Sqlcmd -ServerInstance $using:Node2 -Query @"
+IF NOT EXISTS (SELECT 1 FROM sys.availability_groups WHERE name = '$($using:AGName)')
+    ALTER AVAILABILITY GROUP [$($using:AGName)] JOIN;
+ALTER AVAILABILITY GROUP [$($using:AGName)] GRANT CREATE ANY DATABASE;
+"@ -ErrorAction Stop
 } -ErrorAction Stop
 
 # Add listener separately with non-default port to avoid conflict with default SQL instance on 1433
-try {
-    Invoke-Sqlcmd -ServerInstance $Node1 -Query @"
-IF NOT EXISTS (SELECT name FROM sys.availability_group_listeners WHERE group_id = (SELECT group_id FROM sys.availability_groups WHERE name = '$AGName') AND name = '$ListenerName')
+Invoke-Sqlcmd -ServerInstance $Node1 -Query @"
+IF NOT EXISTS (SELECT 1 FROM sys.availability_group_listeners WHERE group_id = (SELECT group_id FROM sys.availability_groups WHERE name = '$AGName') AND dns_name = '$ListenerName')
     ALTER AVAILABILITY GROUP [$AGName]
     ADD LISTENER N'$ListenerName' (
         WITH IP (
@@ -550,9 +643,6 @@ IF NOT EXISTS (SELECT name FROM sys.availability_group_listeners WHERE group_id 
         ), PORT = 14333
     );
 "@ -ErrorAction Stop
-} catch {
-    Write-Output "Listener warning (may be non-fatal): $_"
-}
 
 Write-Output "WSFC_AG_READY"
 '@ | Set-Content -Path $wsfcScript -Encoding utf8
@@ -585,21 +675,23 @@ $wsfcParams = @(
     "ClusterName=sqlha-cl",
     "Node1=SQL-VM-1",
     "Node2=SQL-VM-2",
-    "Node1Ip=10.38.1.10",
-    "Node2Ip=10.38.2.10",
+    "Node1Ip=$($clusterIps[0])",
+    "Node2Ip=$($clusterIps[1])",
     "FSWPath=\\$dcVmName\$fswShareName",
     "DomainUser=$domainAdmin",
     "SqlSvcAccount=$sqlSvcDomain",
+    "SqlAdminLogin=$sqlAdminLogin",
     "AGName=ag-sql-ha",
     "ListenerName=ag-listener",
-    "ListenerIp1=10.38.1.11",
+    "ListenerIp1=$($listenerIps[0])",
     "ListenerSubnet1=$listenerSubnet1",
-    "ListenerIp2=10.38.2.11",
+    "ListenerIp2=$($listenerIps[1])",
     "ListenerSubnet2=$listenerSubnet2"
 )
 $wsfcProtectedParams = @(
     "DomainPassword=$adminPassword",
-    "SqlSvcPassword=$sqlServiceAccountPassword"
+    "SqlSvcPassword=$sqlServiceAccountPassword",
+    "SqlAdminPassword=$sqlAdminPassword"
 )
 
 Invoke-VmScript -ResourceGroup $rgName -VmName 'SQL-VM-1' -RunCommandName 'ConfigureWSFCAG' `
@@ -614,23 +706,26 @@ Write-Host "  [OK] WSFC cluster, file share witness, and AG configured" -Foregro
 # =====================================================================
 Write-Host "`n==> Registering SQL IaaS Agent on SQL VMs..." -ForegroundColor Cyan
 
-$ErrorActionPreference = 'Continue'
 foreach ($vmName in @('SQL-VM-1', 'SQL-VM-2')) {
     Write-Host "  Registering $vmName..." -ForegroundColor Gray
-    $vmId = az vm show --resource-group $rgName --name $vmName --query 'id' -o tsv 2>$null
+    $existingSqlVm = az sql vm show --name $vmName --resource-group $rgName --query 'id' -o tsv 2>$null
+    if ($LASTEXITCODE -eq 0 -and $existingSqlVm) {
+        Write-Host "  [OK] $vmName is already registered" -ForegroundColor Green
+        continue
+    }
+
     az sql vm create `
         --name $vmName `
         --resource-group $rgName `
         --license-type PAYG `
         --sql-mgmt-type Full `
-        --location westus3 2>$null | Out-Null
+        --location $location 2>$null | Out-Null
 
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "  [OK] $vmName registered" -ForegroundColor Green
-    } else {
-        Write-Host "  [WARN] $vmName registration returned non-zero (may already be registered)" -ForegroundColor Yellow
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "SQL IaaS Agent registration failed for $vmName."
+        exit 1
     }
+    Write-Host "  [OK] $vmName registered" -ForegroundColor Green
 }
-$ErrorActionPreference = 'Stop'
 
 Write-Host "`n[OK] All phases complete." -ForegroundColor Green

@@ -11,7 +11,7 @@
     - AG and listener creation (via AG Listener resource)
 
     This script handles what Bicep cannot automate:
-    - Opening Windows Firewall ports (5022 for AG, 1433 for SQL)
+    - Opening Windows Firewall ports (5022 for AG, 1433 for SQL, 14333 for the listener)
     - Creating a sample database on the primary
     - Backing up and restoring the database to the secondary
     - Joining the database to the AG on the secondary
@@ -42,6 +42,8 @@ Write-Host "==> Opening firewall ports on SQL VMs..." -ForegroundColor Cyan
 Invoke-Command -ComputerName $Nodes -ScriptBlock {
     New-NetFirewallRule -Name "ALLOW_SQL_1433" -DisplayName "Allow SQL Server 1433" `
         -Direction Inbound -Protocol TCP -LocalPort 1433 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -Name "ALLOW_SQL_LISTENER_14333" -DisplayName "Allow SQL AG Listener 14333" `
+        -Direction Inbound -Protocol TCP -LocalPort 14333 -Action Allow -ErrorAction SilentlyContinue
     New-NetFirewallRule -Name "ALLOW_HADR_5022" -DisplayName "Allow AG Endpoint 5022" `
         -Direction Inbound -Protocol TCP -LocalPort 5022 -Action Allow -ErrorAction SilentlyContinue
 }

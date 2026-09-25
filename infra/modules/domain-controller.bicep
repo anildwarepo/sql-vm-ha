@@ -9,27 +9,9 @@ param domainFqdn string
 param domainNetBiosName string
 param vmSize string
 
-param vnetName string
-param vnetAddressPrefix string
 param dcSubnetId string
 param dcPrivateIp string
 param dcVmName string
-param dcZone string
-
-type nsgRef = {
-  name: string
-  addressPrefix: string
-  nsgId: string
-}
-
-param subnetsConfig nsgRef[]
-
-type plainSubnetEntry = {
-  name: string
-  addressPrefix: string
-}
-
-param plainSubnets plainSubnetEntry[] = []
 
 // --- DC NIC ---
 
@@ -37,6 +19,12 @@ resource dcNic 'Microsoft.Network/networkInterfaces@2024-05-01' = {
   name: 'nic-${toLower(dcVmName)}'
   location: location
   properties: {
+    dnsSettings: {
+      dnsServers: [
+        dcPrivateIp
+        '168.63.129.16'
+      ]
+    }
     ipConfigurations: [
       {
         name: 'ipconfig1'
@@ -57,7 +45,6 @@ resource dcNic 'Microsoft.Network/networkInterfaces@2024-05-01' = {
 resource dcVm 'Microsoft.Compute/virtualMachines@2024-07-01' = {
   name: dcVmName
   location: location
-  zones: [dcZone]
   properties: {
     hardwareProfile: {
       vmSize: vmSize
@@ -120,20 +107,6 @@ resource cseCreateForest 'Microsoft.Compute/virtualMachines/extensions@2024-07-0
       commandToExecute: createForestScript
     }
   }
-}
-
-// --- Update VNet DNS to point to DC ---
-
-module vnetDnsUpdate 'vnet-dns-update.bicep' = {
-  params: {
-    vnetName: vnetName
-    location: location
-    vnetAddressPrefix: vnetAddressPrefix
-    dnsServers: [dcPrivateIp]
-    subnetsConfig: subnetsConfig
-    plainSubnets: plainSubnets
-  }
-  dependsOn: [cseCreateForest]
 }
 
 output dcVmId string = dcVm.id

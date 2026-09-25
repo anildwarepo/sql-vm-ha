@@ -27,10 +27,10 @@ param clusterBootstrapAccountPassword string
 
 // Networking
 param sqlSubnetIds string[]
+param dcPrivateIp string
 
 type sqlVmConfig = {
   name: string
-  zone: string
   subnetIndex: int
   privateIpAddress: string
   clusterIp: string
@@ -39,6 +39,20 @@ type sqlVmConfig = {
 
 param sqlVms sqlVmConfig[]
 
+var sqlVmImageSku = '${toLower(sqlImageSku)}-gen2'
+
+resource sqlAvailabilitySet 'Microsoft.Compute/availabilitySets@2024-07-01' = {
+  name: 'avset-sql-ha'
+  location: location
+  sku: {
+    name: 'Aligned'
+  }
+  properties: {
+    platformFaultDomainCount: 2
+    platformUpdateDomainCount: 5
+  }
+}
+
 // ─── SQL VM NICs ───
 
 resource sqlNics 'Microsoft.Network/networkInterfaces@2024-05-01' = [
@@ -46,12 +60,41 @@ resource sqlNics 'Microsoft.Network/networkInterfaces@2024-05-01' = [
     name: 'nic-${toLower(vm.name)}'
     location: location
     properties: {
+      dnsSettings: {
+        dnsServers: [
+          dcPrivateIp
+          '168.63.129.16'
+        ]
+      }
       ipConfigurations: [
         {
           name: 'ipconfig1'
           properties: {
+            primary: true
             privateIPAllocationMethod: 'Static'
             privateIPAddress: vm.privateIpAddress
+            subnet: {
+              id: sqlSubnetIds[vm.subnetIndex]
+            }
+          }
+        }
+        {
+          name: 'ipconfig-cluster'
+          properties: {
+            primary: false
+            privateIPAllocationMethod: 'Static'
+            privateIPAddress: vm.clusterIp
+            subnet: {
+              id: sqlSubnetIds[vm.subnetIndex]
+            }
+          }
+        }
+        {
+          name: 'ipconfig-listener'
+          properties: {
+            primary: false
+            privateIPAllocationMethod: 'Static'
+            privateIPAddress: vm.listenerIp
             subnet: {
               id: sqlSubnetIds[vm.subnetIndex]
             }
@@ -68,8 +111,10 @@ resource sqlVmResources 'Microsoft.Compute/virtualMachines@2024-07-01' = [
   for (vm, i) in sqlVms: {
     name: vm.name
     location: location
-    zones: [vm.zone]
     properties: {
+      availabilitySet: {
+        id: sqlAvailabilitySet.id
+      }
       hardwareProfile: {
         vmSize: vmSize
       }
@@ -82,7 +127,7 @@ resource sqlVmResources 'Microsoft.Compute/virtualMachines@2024-07-01' = [
         imageReference: {
           publisher: 'MicrosoftSQLServer'
           offer: sqlImageOffer
-          sku: 'enterprise-gen2'
+          sku: sqlVmImageSku
           version: 'latest'
         }
         osDisk: {
@@ -203,7 +248,7 @@ resource agListener 'Microsoft.SqlVirtualMachine/sqlVirtualMachineGroups/availab
   name: 'ag-listener'
   properties: {
     availabilityGroupName: 'ag-sql-ha'
-    port: 1433
+    port: 14333
     availabilityGroupConfiguration: {
       replicas: [
         {

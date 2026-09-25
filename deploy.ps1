@@ -3,9 +3,9 @@
     Deploys the SQL Server AlwaysOn Availability Group HA infrastructure.
 
 .DESCRIPTION
-    Creates a resource group (if needed) and deploys the Bicep template with
-    VNet, 2 DC VMs, 2 SQL VMs across availability zones, cloud witness,
-    WSFC cluster, and AG listener.
+    Creates a resource group (if needed) and deploys two DC VMs and two SQL
+    VMs into dedicated subnets in an existing VNet, plus the WSFC cluster
+    and AG listener.
 
 .PARAMETER ResourceGroupName
     Name of the resource group to deploy into.
@@ -14,7 +14,7 @@
     Azure region for the deployment.
 
 .EXAMPLE
-    .\deploy.ps1 -ResourceGroupName rg-sql-ha -Location eastus2
+    .\deploy.ps1 -ResourceGroupName rg-sql-ha -Location westus
 #>
 
 [CmdletBinding()]
@@ -22,7 +22,7 @@ param(
     [Parameter(Mandatory)]
     [string]$ResourceGroupName,
 
-    [string]$Location = 'westus2'
+    [string]$Location = 'westus'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -63,6 +63,7 @@ $account = az account show --output json 2>$null | ConvertFrom-Json
 if (-not $account) {
     Write-Host '==> Not logged in. Running az login...' -ForegroundColor Yellow
     az login
+    $account = az account show --output json 2>$null | ConvertFrom-Json
 }
 
 Write-Host "==> Subscription: $($account.name) ($($account.id))" -ForegroundColor Green
@@ -71,6 +72,25 @@ Write-Host "==> Subscription: $($account.name) ($($account.id))" -ForegroundColo
 
 Write-Host "==> Ensuring resource group '$ResourceGroupName' in '$Location'..." -ForegroundColor Cyan
 az group create --name $ResourceGroupName --location $Location --output none
+
+# ─── Validate existing VNet configuration ───
+
+Write-Host '==> Validating existing VNet and dedicated subnet ranges...' -ForegroundColor Cyan
+$preflightScript = Join-Path $PSScriptRoot 'hooks\preprovision.ps1'
+& $preflightScript `
+    -VnetName 'vnet-westus' `
+    -VnetResourceGroupName 'vnet' `
+    -Location $Location `
+    -DcSubnetPrefix '10.0.9.0/24' `
+    -Sql1SubnetPrefix '10.0.10.0/24' `
+    -Sql2SubnetPrefix '10.0.11.0/24' `
+    -DcPrivateIp '10.0.9.4' `
+    -Sql1PrivateIp '10.0.10.4' `
+    -Sql2PrivateIp '10.0.11.4' `
+    -ClusterIp1 '10.0.10.10' `
+    -ClusterIp2 '10.0.11.10' `
+    -ListenerIp1 '10.0.10.11' `
+    -ListenerIp2 '10.0.11.11'
 
 # ─── Deploy ───
 

@@ -9,25 +9,26 @@ param domainFqdn string
 param domainNetBiosName string
 param vmSize string
 
-param vnetName string
-param vnetAddressPrefix string
 param dcSubnetId string
-
-type nsgRef = {
-  name: string
-  addressPrefix: string
-  nsgId: string
-}
-
-param subnetsConfig nsgRef[]
 
 type dcVmConfig = {
   name: string
-  zone: string
   privateIpAddress: string
 }
 
 param dcVms dcVmConfig[]
+
+resource dcAvailabilitySet 'Microsoft.Compute/availabilitySets@2024-07-01' = {
+  name: 'avset-sql-ha-dc'
+  location: location
+  sku: {
+    name: 'Aligned'
+  }
+  properties: {
+    platformFaultDomainCount: 2
+    platformUpdateDomainCount: 5
+  }
+}
 
 // ─── Domain Controller NICs ───
 
@@ -36,6 +37,12 @@ resource dcNics 'Microsoft.Network/networkInterfaces@2024-05-01' = [
     name: 'nic-${toLower(vm.name)}'
     location: location
     properties: {
+      dnsSettings: {
+        dnsServers: [
+          dcVms[0].privateIpAddress
+          '168.63.129.16'
+        ]
+      }
       ipConfigurations: [
         {
           name: 'ipconfig1'
@@ -58,8 +65,10 @@ resource dcVmResources 'Microsoft.Compute/virtualMachines@2024-07-01' = [
   for (vm, i) in dcVms: {
     name: vm.name
     location: location
-    zones: [vm.zone]
     properties: {
+      availabilitySet: {
+        id: dcAvailabilitySet.id
+      }
       hardwareProfile: {
         vmSize: vmSize
       }
@@ -122,17 +131,6 @@ resource cseCreateForest 'Microsoft.Compute/virtualMachines/extensions@2024-07-0
   }
 }
 
-module vnetDnsUpdate 'vnet-dns-update.bicep' = {
-  params: {
-    vnetName: vnetName
-    location: location
-    vnetAddressPrefix: vnetAddressPrefix
-    dnsServers: [for vm in dcVms: vm.privateIpAddress]
-    subnetsConfig: subnetsConfig
-  }
-  dependsOn: [cseCreateForest]
-}
-
 // ─── Custom Script: Promote DC-VM-2 as replica domain controller ───
 
 resource cseReplicaDc 'Microsoft.Compute/virtualMachines/extensions@2024-07-01' = {
@@ -149,7 +147,7 @@ resource cseReplicaDc 'Microsoft.Compute/virtualMachines/extensions@2024-07-01' 
       commandToExecute: 'powershell -ExecutionPolicy Unrestricted -Command "$pass = ConvertTo-SecureString -String \'${adminPassword}\' -AsPlainText -Force; $cred = New-Object System.Management.Automation.PSCredential(\'${domainNetBiosName}\\${adminUsername}\', $pass); Get-Disk | Where-Object PartitionStyle -eq \'RAW\' | Initialize-Disk -PartitionStyle GPT -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume -FileSystem NTFS -NewFileSystemLabel \'ADData\' -Confirm:$false; Install-WindowsFeature AD-Domain-Services,DNS -IncludeManagementTools; Import-Module ADDSDeployment; $maxRetries=30; for($i=0;$i -lt $maxRetries;$i++){try{Install-ADDSDomainController -DomainName \'${domainFqdn}\' -Credential $cred -SafeModeAdministratorPassword $pass -DatabasePath \'F:\\NTDS\' -LogPath \'F:\\NTDS\' -SysvolPath \'F:\\SYSVOL\' -InstallDns -Force -NoRebootOnCompletion; break}catch{Start-Sleep 60}}; Restart-Computer -Force"'
     }
   }
-  dependsOn: [vnetDnsUpdate]
+  dependsOn: [cseCreateForest]
 }
 
 output dcVmIds string[] = [for (vm, i) in dcVms: dcVmResources[i].id]

@@ -13,53 +13,18 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [string]$EnvironmentName
+    [string]$EnvironmentName,
+
+    [string]$SubscriptionId = 'e4718866-4e88-411f-a0b8-10c8051dc165',
+
+    [string]$Location = 'westus',
+
+    [string]$ExistingVnetName = 'vnet-westus',
+
+    [string]$ExistingVnetResourceGroupName = 'vnet'
 )
 
 $ErrorActionPreference = 'Stop'
-
-function Get-PublicIpAddress {
-    $services = @(
-        'https://api.ipify.org?format=text',
-        'https://ifconfig.me/ip'
-    )
-
-    foreach ($service in $services) {
-        try {
-            $ip = (Invoke-RestMethod -Uri $service).ToString().Trim()
-            if ([System.Net.IPAddress]::TryParse($ip, [ref]([System.Net.IPAddress]$null))) {
-                return $ip
-            }
-        }
-        catch {
-            # Try next provider
-        }
-    }
-
-    throw 'Unable to detect public IP address from known providers.'
-}
-
-function ConvertTo-CidrSingleHost {
-    param(
-        [Parameter(Mandatory)]
-        [string]$IpOrCidr
-    )
-
-    if ($IpOrCidr -match '/') {
-        return $IpOrCidr
-    }
-
-    $ipAddress = $null
-    if (-not [System.Net.IPAddress]::TryParse($IpOrCidr, [ref]$ipAddress)) {
-        throw "Invalid IP address value: $IpOrCidr"
-    }
-
-    if ($ipAddress.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork) {
-        return "$IpOrCidr/32"
-    }
-
-    return "$IpOrCidr/128"
-}
 
 # Check azd is installed
 if (-not (Get-Command azd -ErrorAction SilentlyContinue)) {
@@ -78,17 +43,26 @@ azd env set AZURE_ADMIN_USERNAME 'azureadmin' -e $EnvironmentName
 azd env set AZURE_DOMAIN_FQDN 'contoso.local' -e $EnvironmentName
 azd env set AZURE_DOMAIN_NETBIOS 'CONTOSO' -e $EnvironmentName
 azd env set AZURE_SQL_SERVICE_ACCOUNT 'sqlservice@contoso.local' -e $EnvironmentName
+azd env set AZURE_SQL_ADMIN_LOGIN 'sqladmin' -e $EnvironmentName
 azd env set AZURE_CLUSTER_OPERATOR_ACCOUNT 'clusteradmin@contoso.local' -e $EnvironmentName
 azd env set AZURE_CLUSTER_BOOTSTRAP_ACCOUNT 'clusteradmin@contoso.local' -e $EnvironmentName
 azd env set AZURE_SQL_IMAGE_OFFER 'sql2022-ws2022' -e $EnvironmentName
 azd env set AZURE_SQL_IMAGE_SKU 'Enterprise' -e $EnvironmentName
-
-# Detect and set the public IP of this machine for NSG allow-listing
-Write-Host "`n==> Detecting public IP of this machine..." -ForegroundColor Cyan
-$detectedIp = Get-PublicIpAddress
-$allowedIp = ConvertTo-CidrSingleHost -IpOrCidr $detectedIp
-Write-Host "    Detected IP/CIDR: $allowedIp" -ForegroundColor White
-azd env set AZURE_ALLOWED_SOURCE_IP $allowedIp -e $EnvironmentName
+azd env set AZURE_SUBSCRIPTION_ID $SubscriptionId -e $EnvironmentName
+azd env set AZURE_LOCATION $Location -e $EnvironmentName
+azd env set AZURE_EXISTING_VNET_NAME $ExistingVnetName -e $EnvironmentName
+azd env set AZURE_EXISTING_VNET_RESOURCE_GROUP $ExistingVnetResourceGroupName -e $EnvironmentName
+azd env set AZURE_VPN_CLIENT_ADDRESS_PREFIX '10.255.0.0/27' -e $EnvironmentName
+azd env set AZURE_DC_SUBNET_PREFIX '10.0.9.0/24' -e $EnvironmentName
+azd env set AZURE_SQL1_SUBNET_PREFIX '10.0.10.0/24' -e $EnvironmentName
+azd env set AZURE_SQL2_SUBNET_PREFIX '10.0.11.0/24' -e $EnvironmentName
+azd env set AZURE_DC_PRIVATE_IP '10.0.9.4' -e $EnvironmentName
+azd env set AZURE_SQL1_PRIVATE_IP '10.0.10.4' -e $EnvironmentName
+azd env set AZURE_SQL2_PRIVATE_IP '10.0.11.4' -e $EnvironmentName
+azd env set AZURE_CLUSTER_IP1 '10.0.10.10' -e $EnvironmentName
+azd env set AZURE_CLUSTER_IP2 '10.0.11.10' -e $EnvironmentName
+azd env set AZURE_LISTENER_IP1 '10.0.10.11' -e $EnvironmentName
+azd env set AZURE_LISTENER_IP2 '10.0.11.11' -e $EnvironmentName
 $ErrorActionPreference = 'Stop'
 
 # Collect secrets
@@ -104,6 +78,10 @@ $sqlSvcPass = Read-Host -Prompt 'SQL Service account password' -AsSecureString
 $sqlSvcPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sqlSvcPass))
 $ErrorActionPreference = 'Continue'
 azd env set AZURE_SQL_SERVICE_PASSWORD $sqlSvcPlain -e $EnvironmentName
+
+$sqlAdminPass = Read-Host -Prompt 'SQL authentication admin password' -AsSecureString
+$sqlAdminPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sqlAdminPass))
+azd env set AZURE_SQL_ADMIN_PASSWORD $sqlAdminPlain -e $EnvironmentName
 
 $clusterOpPass = Read-Host -Prompt 'Cluster operator password' -AsSecureString
 $clusterOpPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($clusterOpPass))

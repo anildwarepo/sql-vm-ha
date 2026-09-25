@@ -13,6 +13,45 @@
     },
     "domainNetBiosName": {
       "value": "CONTOSO"
+    },
+    "existingVnetName": {
+      "value": "${AZURE_EXISTING_VNET_NAME}"
+    },
+    "existingVnetResourceGroupName": {
+      "value": "${AZURE_EXISTING_VNET_RESOURCE_GROUP}"
+    },
+    "vpnClientAddressPrefix": {
+      "value": "${AZURE_VPN_CLIENT_ADDRESS_PREFIX}"
+    },
+    "dcSubnetPrefix": {
+      "value": "${AZURE_DC_SUBNET_PREFIX}"
+    },
+    "sql1SubnetPrefix": {
+      "value": "${AZURE_SQL1_SUBNET_PREFIX}"
+    },
+    "sql2SubnetPrefix": {
+      "value": "${AZURE_SQL2_SUBNET_PREFIX}"
+    },
+    "dcPrivateIp": {
+      "value": "${AZURE_DC_PRIVATE_IP}"
+    },
+    "sql1PrivateIp": {
+      "value": "${AZURE_SQL1_PRIVATE_IP}"
+    },
+    "sql2PrivateIp": {
+      "value": "${AZURE_SQL2_PRIVATE_IP}"
+    },
+    "clusterIp1": {
+      "value": "${AZURE_CLUSTER_IP1}"
+    },
+    "clusterIp2": {
+      "value": "${AZURE_CLUSTER_IP2}"
+    },
+    "listenerIp1": {
+      "value": "${AZURE_LISTENER_IP1}"
+    },
+    "listenerIp2": {
+      "value": "${AZURE_LISTENER_IP2}"
     }
   }
 }

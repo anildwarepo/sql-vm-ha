@@ -1,7 +1,7 @@
-// Module: Virtual Network + Network Security Groups
+// Module: Dedicated SQL HA subnets and NSGs in an existing virtual network
 param location string
 param vnetName string
-param vnetAddressPrefix string
+param vpnClientAddressPrefix string
 
 type subnetConfig = {
   name: string
@@ -10,15 +10,17 @@ type subnetConfig = {
 
 param subnets subnetConfig[]
 
-// ─── Network Security Groups ───
+resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' existing = {
+  name: vnetName
+}
 
 resource nsgDc 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
-  name: 'nsg-dc-subnet'
+  name: 'nsg-sql-ha-dc'
   location: location
   properties: {
     securityRules: [
       {
-        name: 'AllowRDP'
+        name: 'AllowRdpFromVpn'
         properties: {
           priority: 1000
           direction: 'Inbound'
@@ -26,7 +28,48 @@ resource nsgDc 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
           protocol: 'Tcp'
           sourcePortRange: '*'
           destinationPortRange: '3389'
-          sourceAddressPrefix: 'VirtualNetwork'
+          sourceAddressPrefix: vpnClientAddressPrefix
+          destinationAddressPrefix: '*'
+        }
+      }
+      {
+        name: 'AllowSqlHaSubnetsInbound'
+        properties: {
+          priority: 1200
+          direction: 'Inbound'
+          access: 'Allow'
+          protocol: '*'
+          sourcePortRange: '*'
+          destinationPortRange: '*'
+          sourceAddressPrefixes: [
+            subnets[0].addressPrefix
+            subnets[1].addressPrefix
+            subnets[2].addressPrefix
+          ]
+          destinationAddressPrefix: '*'
+        }
+      }
+      {
+        name: 'AllowAdFromVpn'
+        properties: {
+          priority: 1100
+          direction: 'Inbound'
+          access: 'Allow'
+          protocol: '*'
+          sourcePortRange: '*'
+          destinationPortRanges: [
+            '53'
+            '88'
+            '135'
+            '389'
+            '445'
+            '464'
+            '636'
+            '3268'
+            '3269'
+            '49152-65535'
+          ]
+          sourceAddressPrefix: vpnClientAddressPrefix
           destinationAddressPrefix: '*'
         }
       }
@@ -35,33 +78,86 @@ resource nsgDc 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
 }
 
 resource nsgSql1 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
-  name: 'nsg-sql-subnet-1'
+  name: 'nsg-sql-ha-sql-1'
   location: location
   properties: {
     securityRules: [
       {
-        name: 'AllowSQL'
+        name: 'AllowRdpFromVpn'
         properties: {
           priority: 1000
           direction: 'Inbound'
           access: 'Allow'
           protocol: 'Tcp'
           sourcePortRange: '*'
-          destinationPortRange: '1433'
-          sourceAddressPrefix: 'VirtualNetwork'
+          destinationPortRange: '3389'
+          sourceAddressPrefix: vpnClientAddressPrefix
           destinationAddressPrefix: '*'
         }
       }
       {
-        name: 'AllowHADR'
+        name: 'AllowSqlListenerFromVpn'
+        properties: {
+          priority: 1010
+          direction: 'Inbound'
+          access: 'Allow'
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '14333'
+          sourceAddressPrefix: vpnClientAddressPrefix
+          destinationAddressPrefix: '*'
+        }
+      }
+      {
+        name: 'AllowSqlFromSqlHaSubnets'
         properties: {
           priority: 1100
           direction: 'Inbound'
           access: 'Allow'
           protocol: 'Tcp'
           sourcePortRange: '*'
+          destinationPortRanges: [
+            '1433'
+            '14333'
+          ]
+          sourceAddressPrefixes: [
+            subnets[0].addressPrefix
+            subnets[1].addressPrefix
+            subnets[2].addressPrefix
+          ]
+          destinationAddressPrefix: '*'
+        }
+      }
+      {
+        name: 'AllowHadrFromSqlHaSubnets'
+        properties: {
+          priority: 1110
+          direction: 'Inbound'
+          access: 'Allow'
+          protocol: 'Tcp'
+          sourcePortRange: '*'
           destinationPortRange: '5022'
-          sourceAddressPrefix: 'VirtualNetwork'
+          sourceAddressPrefixes: [
+            subnets[1].addressPrefix
+            subnets[2].addressPrefix
+          ]
+          destinationAddressPrefix: '*'
+        }
+      }
+      {
+        name: 'AllowWsfcFromSqlHaSubnets'
+        properties: {
+          priority: 1120
+          direction: 'Inbound'
+          access: 'Allow'
+          protocol: '*'
+          sourcePortRange: '*'
+          destinationPortRange: '*'
+          sourceAddressPrefixes: [
+            subnets[0].addressPrefix
+            subnets[1].addressPrefix
+            subnets[2].addressPrefix
+          ]
           destinationAddressPrefix: '*'
         }
       }
@@ -70,78 +166,30 @@ resource nsgSql1 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
 }
 
 resource nsgSql2 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
-  name: 'nsg-sql-subnet-2'
+  name: 'nsg-sql-ha-sql-2'
   location: location
   properties: {
-    securityRules: [
-      {
-        name: 'AllowSQL'
-        properties: {
-          priority: 1000
-          direction: 'Inbound'
-          access: 'Allow'
-          protocol: 'Tcp'
-          sourcePortRange: '*'
-          destinationPortRange: '1433'
-          sourceAddressPrefix: 'VirtualNetwork'
-          destinationAddressPrefix: '*'
-        }
-      }
-      {
-        name: 'AllowHADR'
-        properties: {
-          priority: 1100
-          direction: 'Inbound'
-          access: 'Allow'
-          protocol: 'Tcp'
-          sourcePortRange: '*'
-          destinationPortRange: '5022'
-          sourceAddressPrefix: 'VirtualNetwork'
-          destinationAddressPrefix: '*'
-        }
-      }
-    ]
+    securityRules: nsgSql1.properties.securityRules
   }
 }
 
-// ─── Virtual Network ───
-
-resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
-  name: vnetName
-  location: location
-  properties: {
-    addressSpace: {
-      addressPrefixes: [vnetAddressPrefix]
+@batchSize(1)
+resource subnetsResources 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' = [
+  for (subnet, i) in subnets: {
+    parent: vnet
+    name: subnet.name
+    properties: {
+      addressPrefix: subnet.addressPrefix
+      networkSecurityGroup: {
+        id: i == 0 ? nsgDc.id : (i == 1 ? nsgSql1.id : nsgSql2.id)
+      }
     }
-    subnets: [
-      {
-        name: subnets[0].name
-        properties: {
-          addressPrefix: subnets[0].addressPrefix
-          networkSecurityGroup: { id: nsgDc.id }
-        }
-      }
-      {
-        name: subnets[1].name
-        properties: {
-          addressPrefix: subnets[1].addressPrefix
-          networkSecurityGroup: { id: nsgSql1.id }
-        }
-      }
-      {
-        name: subnets[2].name
-        properties: {
-          addressPrefix: subnets[2].addressPrefix
-          networkSecurityGroup: { id: nsgSql2.id }
-        }
-      }
-    ]
   }
-}
+]
 
 output vnetId string = vnet.id
 output vnetName string = vnet.name
-output subnetIds string[] = [for (s, i) in subnets: vnet.properties.subnets[i].id]
+output subnetIds string[] = [for (subnet, i) in subnets: subnetsResources[i].id]
 output nsgDcId string = nsgDc.id
 output nsgSql1Id string = nsgSql1.id
 output nsgSql2Id string = nsgSql2.id

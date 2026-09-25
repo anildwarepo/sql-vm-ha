@@ -5,6 +5,11 @@ infra:
   provider: bicep
   path: infra
 hooks:
+  preprovision:
+    shell: pwsh
+    run: ./hooks/preprovision.ps1
+    interactive: false
+    continueOnError: false
   postprovision:
     shell: pwsh
     run: ./hooks/postprovision.ps1

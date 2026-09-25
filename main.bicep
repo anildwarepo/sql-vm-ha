@@ -48,37 +48,77 @@ param sqlImageOffer string = 'sql2022-ws2022'
 @allowed(['Enterprise', 'Developer', 'Standard'])
 param sqlImageSku string = 'Enterprise'
 
+@description('Name of the existing virtual network')
+param existingVnetName string = 'vnet-westus'
+
+@description('Resource group containing the existing virtual network')
+param existingVnetResourceGroupName string = 'vnet'
+
+@description('Point-to-site VPN client address prefix')
+param vpnClientAddressPrefix string = '10.255.0.0/27'
+
+@description('Dedicated domain controller subnet prefix')
+param dcSubnetPrefix string = '10.0.9.0/24'
+
+@description('Dedicated SQL replica 1 subnet prefix')
+param sql1SubnetPrefix string = '10.0.10.0/24'
+
+@description('Dedicated SQL replica 2 subnet prefix')
+param sql2SubnetPrefix string = '10.0.11.0/24'
+
+@description('Static private IP addresses for the domain controllers')
+param dcPrivateIps string[] = [
+  '10.0.9.4'
+  '10.0.9.5'
+]
+
+@description('Static private IP addresses for the SQL VMs')
+param sqlPrivateIps string[] = [
+  '10.0.10.4'
+  '10.0.11.4'
+]
+
+@description('WSFC IP addresses for SQL subnet 1 and SQL subnet 2')
+param clusterIps string[] = [
+  '10.0.10.10'
+  '10.0.11.10'
+]
+
+@description('AG listener IP addresses for SQL subnet 1 and SQL subnet 2')
+param listenerIps string[] = [
+  '10.0.10.11'
+  '10.0.11.11'
+]
+
 // --- Configuration ---
 
-var vnetName = 'vnet-sql-ha'
-var vnetAddressPrefix = '10.38.0.0/16'
-
 var subnets = [
-  { name: 'DC-Subnet', addressPrefix: '10.38.0.0/24' }
-  { name: 'SQL-Subnet-1', addressPrefix: '10.38.1.0/24' }
-  { name: 'SQL-Subnet-2', addressPrefix: '10.38.2.0/24' }
+  { name: 'sql-ha-dc', addressPrefix: dcSubnetPrefix }
+  { name: 'sql-ha-sql-1', addressPrefix: sql1SubnetPrefix }
+  { name: 'sql-ha-sql-2', addressPrefix: sql2SubnetPrefix }
 ]
 
 var dcVmSize = 'Standard_D2s_v6'
 var sqlVmSize = 'Standard_D4s_v6'
 
 var dcVms = [
-  { name: 'DC-VM-1', zone: '1', privateIpAddress: '10.38.0.4' }
-  { name: 'DC-VM-2', zone: '2', privateIpAddress: '10.38.0.5' }
+  { name: 'DC-VM-1', privateIpAddress: dcPrivateIps[0] }
+  { name: 'DC-VM-2', privateIpAddress: dcPrivateIps[1] }
 ]
 
 var sqlVms = [
-  { name: 'SQL-VM-1', zone: '1', subnetIndex: 0, privateIpAddress: '10.38.1.4', clusterIp: '10.38.1.10', listenerIp: '10.38.1.11' }
-  { name: 'SQL-VM-2', zone: '2', subnetIndex: 1, privateIpAddress: '10.38.2.4', clusterIp: '10.38.2.10', listenerIp: '10.38.2.11' }
+  { name: 'SQL-VM-1', subnetIndex: 0, privateIpAddress: sqlPrivateIps[0], clusterIp: clusterIps[0], listenerIp: listenerIps[0] }
+  { name: 'SQL-VM-2', subnetIndex: 1, privateIpAddress: sqlPrivateIps[1], clusterIp: clusterIps[1], listenerIp: listenerIps[1] }
 ]
 
 // --- Module 1: Network (VNet + NSGs) ---
 
 module network 'modules/network.bicep' = {
+  scope: resourceGroup(existingVnetResourceGroupName)
   params: {
     location: location
-    vnetName: vnetName
-    vnetAddressPrefix: vnetAddressPrefix
+    vnetName: existingVnetName
+    vpnClientAddressPrefix: vpnClientAddressPrefix
     subnets: subnets
   }
 }
@@ -93,15 +133,8 @@ module domainControllers 'modules/domain-controller.bicep' = {
     domainFqdn: domainFqdn
     domainNetBiosName: domainNetBiosName
     vmSize: dcVmSize
-    vnetName: vnetName
-    vnetAddressPrefix: vnetAddressPrefix
     dcSubnetId: network.outputs.subnetIds[0]
     dcVms: dcVms
-    subnetsConfig: [
-      { name: subnets[0].name, addressPrefix: subnets[0].addressPrefix, nsgId: network.outputs.nsgDcId }
-      { name: subnets[1].name, addressPrefix: subnets[1].addressPrefix, nsgId: network.outputs.nsgSql1Id }
-      { name: subnets[2].name, addressPrefix: subnets[2].addressPrefix, nsgId: network.outputs.nsgSql2Id }
-    ]
   }
 }
 
@@ -125,6 +158,7 @@ module sqlServers 'modules/sql-vm.bicep' = {
     clusterBootstrapAccount: clusterBootstrapAccount
     clusterBootstrapAccountPassword: clusterBootstrapAccountPassword
     sqlSubnetIds: [network.outputs.subnetIds[1], network.outputs.subnetIds[2]]
+    dcPrivateIp: dcPrivateIps[0]
     sqlVms: sqlVms
   }
   dependsOn: [domainControllers]
