@@ -1,0 +1,107 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Validate prerequisites",
+      "type": "aitk",
+      "command": "debug-check-prerequisites",
+      "args": {
+        "portOccupancy": [5679, 8088]
+      }
+    },
+    {
+      "label": "Run Agent/Workflow HTTP Server",
+      "type": "shell",
+      "command": "${workspaceFolder}/sql-controlplane/src/sql-ha-agent/.venv/Scripts/python.exe -m debugpy --listen 127.0.0.1:5679 ${workspaceFolder}/sql-controlplane/src/sql-ha-agent/main.py",
+      "isBackground": true,
+      "options": {
+        "cwd": "${workspaceFolder}/sql-controlplane/src/sql-ha-agent"
+      },
+      "dependsOn": ["Validate prerequisites", "Sync hosted agent code"],
+      "problemMatcher": {
+        "pattern": [{ "regexp": "^.*$", "file": 0, "location": 1, "message": 2 }],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": "Application startup complete|[Rr]unning on|Started server process"
+        }
+      }
+    },
+    {
+      "label": "Open Agent Inspector",
+      "type": "shell",
+      "command": "echo '${input:openAgentInspector}'",
+      "presentation": { "reveal": "never" },
+      "dependsOn": ["Run Agent/Workflow HTTP Server"]
+    },
+    {
+      "label": "Sync hosted agent code",
+      "detail": "Copy core/sqlha and .github/skills into src/sql-ha-agent (also runs as the azd predeploy hook)",
+      "type": "shell",
+      "command": "pwsh -NoProfile -File ${workspaceFolder}/sql-controlplane/scripts/sync-agent.ps1",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Agent/Workflow in Terminal",
+      "type": "shell",
+      "command": "${workspaceFolder}/sql-controlplane/src/sql-ha-agent/.venv/Scripts/python.exe -m debugpy --listen 127.0.0.1:5679 ${workspaceFolder}/sql-controlplane/src/sql-ha-agent/main.py",
+      "isBackground": true,
+      "options": {
+        "cwd": "${workspaceFolder}/sql-controlplane/src/sql-ha-agent"
+      },
+      "dependsOn": ["Sync hosted agent code"],
+      "problemMatcher": {
+        "pattern": [{ "regexp": "^.*$", "file": 0, "location": 1, "message": 2 }],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": "Application startup complete|[Rr]unning on|Started server process"
+        }
+      }
+    },
+    {
+      "label": "Run SQL control plane",
+      "detail": "React UI on http://127.0.0.1:5173 + FastAPI on http://127.0.0.1:8000 (Swagger at /docs)",
+      "type": "shell",
+      "command": "python ${workspaceFolder}/sql-controlplane/run_all.py",
+      "isBackground": true,
+      "options": { "cwd": "${workspaceFolder}/sql-controlplane" },
+      "problemMatcher": {
+        "pattern": [{ "regexp": "^.*$", "file": 0, "location": 1, "message": 2 }],
+        "background": { "activeOnStart": true, "beginsPattern": ".*", "endsPattern": "Ctrl\\+C to stop" }
+      }
+    },
+    {
+      "label": "Run SQL control plane (single port)",
+      "detail": "Build the UI and serve UI + API from http://127.0.0.1:8000",
+      "type": "shell",
+      "command": "python ${workspaceFolder}/sql-controlplane/run_all.py --prod",
+      "isBackground": true,
+      "options": { "cwd": "${workspaceFolder}/sql-controlplane" },
+      "problemMatcher": {
+        "pattern": [{ "regexp": "^.*$", "file": 0, "location": 1, "message": 2 }],
+        "background": { "activeOnStart": true, "beginsPattern": ".*", "endsPattern": "Ctrl\\+C to stop" }
+      }
+    },
+    {
+      "label": "Terminate All Tasks",
+      "command": "echo ${input:terminate}",
+      "type": "shell",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "openAgentInspector",
+      "type": "command",
+      "command": "ai-mlstudio.openTestTool",
+      "args": { "triggeredFrom": "tasks", "port": 8088 }
+    },
+    {
+      "id": "terminate",
+      "type": "command",
+      "command": "workbench.action.tasks.terminate",
+      "args": "terminateAll"
+    }
+  ]
+}

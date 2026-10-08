@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "sqlha": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/sql-controlplane/backend/.venv/Scripts/python.exe",
+      "args": ["-m", "sqlha.mcp_server"],
+      "cwd": "${workspaceFolder}/sql-controlplane/backend",
+      "envFile": "${workspaceFolder}/sql-controlplane/.env",
+      "env": {
+        "SQLHA_CONTROLPLANE_API": "http://127.0.0.1:8000"
+      }
+    }
+  }
+}

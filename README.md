@@ -204,11 +204,11 @@ The script creates the following in the Arc resource group:
 
 | Resource | Purpose |
 |----------|---------|
-| `mc-sqlag-sql-vm-2`, `mc-sqlag-sql-vm-1` | One maintenance configuration per node ("wave"), staggered by `WindowDuration + GapMinutes`. Tags (`SqlAgTarget`, `SqlAgPartner`, `SqlAgName`, ...) tell the runbooks which node is patched |
+| `mc-sqlag-<node>` (or `-ConfigNames`) | One maintenance configuration per node ("wave"), staggered by `WindowDuration + GapMinutes`. Tags (`SqlAgTarget`, `SqlAgPartner`, `SqlAgName`, ...) tell the runbooks which node is patched. This environment uses `sql-update-wave1` (SQL-VM-1) and `sql-update-wave2` (SQL-VM-2) |
 | `aa-sql-ag-patching` | Automation account with a system-assigned identity. The identity gets *Contributor* on each Arc SQL instance (for the AG API) and on each configuration (to cancel a run) |
 | `Pre-SqlAgFailover` runbook | Started by the pre-maintenance event, 30-40 min before a wave. If the node to be patched is the primary, it does a planned failover to the synchronized secondary. If that is unsafe (partner offline or not synchronized, or the failover fails), it **cancels the run** |
 | `Post-SqlAgValidate` runbook | Started by the post-maintenance event. Waits until the Arc SQL extension reports the replica connected and synchronized after the reboot, then logs the SQL build. If the patched node is `-PreferredPrimary` (default `SQL-VM-1`), it fails the AG back. The job fails if the node is unhealthy, and the next wave's pre-runbook then cancels that wave |
-| `st-mc-sqlag-*` system topics | One Event Grid system topic per configuration, with pre and post event subscriptions that call the runbook webhooks |
+| `st-<configuration>` system topics | One Event Grid system topic per configuration, with pre and post event subscriptions that call the runbook webhooks |
 
 The script also sets up the nodes:
 
@@ -216,6 +216,18 @@ The script also sets up the nodes:
 - It removes other Update Manager schedules assigned to the nodes, such as `autoupdate-config` from *SQL Server - Azure Arc > Updates*, because they patch both nodes at once. Also turn off automatic updates in that blade. Use `-KeepOtherAssignments` to keep the other schedules.
 
 The runbooks call only ARM: the SQL Server enabled by Azure Arc availability group API (`getDetailView` for live AG state, `failover` for a planned failover). No Run Command, T-SQL or SQL login is needed. Check job output under *Automation account > Jobs* and patch results under *Azure Update Manager > History*.
+
+### SQL Control Plane (monitoring, patching, dashboard and API)
+
+`sql-controlplane/` and `.github/` add an operations layer on top of Arc, Update Manager and the AG-aware waves.
+It answers questions about patch status, outstanding updates, maintenance windows, security risks, Always On health,
+performance and metadata, and it can patch and fail over safely. One shared Python core (`sqlha`) powers:
+- a React dashboard with drill-down, node actions and a chat panel;
+- a FastAPI backend with Swagger (`python sql-controlplane/run_all.py` starts both);
+- a VS Code custom agent (`sql-ha-agent`, backed by the local `sqlha` MCP server);
+- a Microsoft Foundry hosted agent.
+
+See [sql-controlplane/README.md](sql-controlplane/README.md).
 
 > Webhooks expire after `-WebhookExpiryDays` (default 365). Rerun the script with `-RotateWebhooks` before then. If a pre-event cannot start its runbook, Update Manager still patches that node without a failover.
 
@@ -247,6 +259,11 @@ The runbooks call only ARM: the SQL Server enabled by Azure Arc availability gro
 │   ├── patching/       # AG-aware patching: Update Manager schedules + pre/post runbooks
 │   │   └── runbooks/
 │   └── sample-data/    # Coupa procure-to-pay demo databases
+├── sql-controlplane/   # SQL Control Plane: React UI + FastAPI/Swagger + shared sqlha core, MCP server, Foundry hosted agent
+├── .github/
+│   ├── agents/         # VS Code custom agent: sql-ha-agent
+│   └── skills/         # sql-ha-* skills (overview, Always On, patching, maintenance, security, performance, metadata, dashboard)
+├── .vscode/            # mcp.json (sqlha MCP server), F5 hosted-agent debug, "Run SQL control plane" tasks
 ├── infra/
 │   ├── main.bicep
 │   ├── main.parameters.json

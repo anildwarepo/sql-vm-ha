@@ -7,3 +7,6 @@ SQL-VM-2 10.0.11.4:1433	Pass
 Active listener 10.0.10.11:14333	Pass
 Passive listener 10.0.11.11:14333	Offline, expected
 ag-listener.contoso.local DNS	Resolves to both listener IPs
+
+
+

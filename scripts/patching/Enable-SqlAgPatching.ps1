@@ -47,6 +47,9 @@ param(
     [string]$SecondNode = 'SQL-VM-1',
     # After it is patched, the AG is failed back to this node. Empty = never fail back.
     [string]$PreferredPrimary = 'SQL-VM-1',
+    # Maintenance configuration names for wave 1 and wave 2. Default: mc-sqlag-<node>.
+    # Configurations of the same AG with other names (e.g. after a rename) are deleted once the new ones are wired up.
+    [string[]]$ConfigNames = @(),
     # Update Manager recurrence, e.g. 'Week Saturday', 'Month Second Tuesday Offset4', '1Day'
     [string]$RecurEvery = 'Week Saturday',
     # First wave start (HH:mm, in -TimeZone). The second wave starts WindowDuration + GapMinutes later.
@@ -95,6 +98,7 @@ if (-not $ArcResourceGroup) {
 if (-not $PatchingResourceGroup) { $PatchingResourceGroup = $ArcResourceGroup }
 if ($FirstNode -eq $SecondNode) { throw 'FirstNode and SecondNode must be different.' }
 if ($PreferredPrimary -and $PreferredPrimary -notin $FirstNode, $SecondNode) { throw "PreferredPrimary must be '$FirstNode', '$SecondNode' or empty." }
+if ($ConfigNames.Count -and ($ConfigNames.Count -ne 2 -or $ConfigNames[0] -eq $ConfigNames[1])) { throw 'ConfigNames must be two different names (wave 1, wave 2).' }
 
 $account = Invoke-Az @('account', 'show') -Json
 if ($SubscriptionId -and $account.id -ne $SubscriptionId) {
@@ -124,7 +128,10 @@ $waves = @(
     [pscustomobject]@{ Wave = 1; Target = $FirstNode; Partner = $SecondNode; Start = $wave1Start },
     [pscustomobject]@{ Wave = 2; Target = $SecondNode; Partner = $FirstNode; Start = $wave2Start }
 )
-foreach ($w in $waves) { $w | Add-Member -NotePropertyName ConfigName -NotePropertyValue ("mc-sqlag-{0}" -f $w.Target.ToLower()) }
+foreach ($w in $waves) {
+    $name = if ($ConfigNames.Count) { $ConfigNames[$w.Wave - 1] } else { 'mc-sqlag-{0}' -f $w.Target.ToLower() }
+    $w | Add-Member -NotePropertyName ConfigName -NotePropertyValue $name
+}
 
 Write-Section 'AG-aware patching with Azure Update Manager'
 Write-Info "Subscription     : $($account.name) ($SubscriptionId)"
@@ -451,6 +458,30 @@ catch {
         }
     }
     throw
+}
+
+# ---------------------------------------------------------------- superseded configurations
+# Maintenance configurations cannot be renamed; remove the ones this AG used before (e.g. mc-sqlag-<node>).
+$allConfigs = Invoke-Arm -Path "/subscriptions/$SubscriptionId/resourceGroups/$PatchingResourceGroup/providers/Microsoft.Maintenance/maintenanceConfigurations?api-version=$($script:MaintenanceApi)"
+$stale = @(@($allConfigs.value) | Where-Object {
+        $_ -and $_.tags.SqlAgTarget -and $_.tags.SqlAgName -eq $AvailabilityGroupName -and $_.name -notin @($waves.ConfigName)
+    })
+if ($stale) {
+    Write-Section 'Removing superseded maintenance configurations'
+    foreach ($mc in $stale) {
+        $topicName = "st-$($mc.name)"
+        if (Invoke-Az @('eventgrid', 'system-topic', 'show', '-g', $PatchingResourceGroup, '-n', $topicName) -Json -AllowFailure) {
+            Invoke-Az @('eventgrid', 'system-topic', 'delete', '-g', $PatchingResourceGroup, '-n', $topicName, '--yes') | Out-Null
+            Write-Ok "Deleted system topic $topicName"
+        }
+        $machineRg = if ($mc.tags.SqlAgMachineResourceGroup) { $mc.tags.SqlAgMachineResourceGroup } else { $ArcResourceGroup }
+        $machineId = "/subscriptions/$SubscriptionId/resourceGroups/$machineRg/providers/Microsoft.HybridCompute/machines/$($mc.tags.SqlAgTarget)"
+        Invoke-Arm -Method DELETE -Path "$machineId/providers/Microsoft.Maintenance/configurationAssignments/$($mc.name)?api-version=$($script:MaintenanceApi)" -AllowNotFound | Out-Null
+        $roles = Invoke-Az @('role', 'assignment', 'list', '--assignee', $principalId, '--scope', $mc.id) -Json -AllowFailure
+        foreach ($ra in @($roles | Where-Object { $_ })) { Invoke-Az @('role', 'assignment', 'delete', '--ids', $ra.id) -AllowFailure | Out-Null }
+        Invoke-Arm -Method DELETE -Path "$($mc.id)?api-version=$($script:MaintenanceApi)" -AllowNotFound | Out-Null
+        Write-Ok "Deleted maintenance configuration $($mc.name) ($($mc.tags.SqlAgTarget), wave $($mc.tags.SqlAgWave))"
+    }
 }
 
 # ---------------------------------------------------------------- summary

@@ -1,0 +1,15 @@
+[project]
+name = "sql-ha-agent"
+version = "0.1.0"
+description = "Foundry hosted agent that monitors and patches SQL Server Always On AGs managed by Azure Arc."
+requires-python = ">=3.13"
+dependencies = [
+    "agent-framework-foundry",
+    "agent-framework-foundry-hosting>=1.0.0b260813",
+    "azure-identity",
+    "requests",
+    "pydantic>=2",
+    "tzdata",
+    "mcp>=1.9,<2",
+    "debugpy",
+]

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sqlha-core"
+version = "0.2.0"
+description = "Core library for monitoring and patching SQL Server Always On availability groups managed by Azure Arc."
+requires-python = ">=3.11"
+dependencies = [
+    "azure-identity",
+    "requests",
+    "pydantic>=2",
+    "tzdata",
+]
+
+[project.optional-dependencies]
+# Agent Framework agent used by the Foundry hosted agent and the control-plane chat.
+agent = ["agent-framework-foundry"]
+# stdio MCP server used by the VS Code sql-ha-agent.
+mcp = ["mcp>=1.9,<2"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["sqlha"]

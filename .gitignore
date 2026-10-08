@@ -3,3 +3,11 @@
 
 # Secrets
 .env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# SQL HA dashboard output
+.sqlha/

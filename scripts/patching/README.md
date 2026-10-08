@@ -8,8 +8,8 @@ For patching hundreds of instances, see [SCALING.md](SCALING.md).
 
 | Component | Name | Role |
 |-----------|------|------|
-| Maintenance configurations | `mc-sqlag-sql-vm-2` (wave 1), `mc-sqlag-sql-vm-1` (wave 2) | One schedule per node, so the nodes never patch at the same time. Their tags name the target node, its AG partner, the AG and the preferred primary |
-| Event Grid system topics | `st-mc-sqlag-*` | Forward each configuration's pre- and post-maintenance events |
+| Maintenance configurations | `sql-update-wave1` (SQL-VM-1), `sql-update-wave2` (SQL-VM-2); default names are `mc-sqlag-<node>` | One schedule per node, so the nodes never patch at the same time. Their tags name the target node, its AG partner, the AG and the preferred primary |
+| Event Grid system topics | `st-<configuration>` | Forward each configuration's pre- and post-maintenance events |
 | Automation webhooks | `wh-pre-sqlag-failover`, `wh-post-sqlag-validate` | Start the runbooks when an event arrives |
 | Runbooks | `Pre-SqlAgFailover`, `Post-SqlAgValidate` | Read and change the AG state with the Arc SQL availability group API (ARM only; see below) |
 | Automation account | `aa-sql-ag-patching` | Its managed identity has *Contributor* on each Arc SQL instance (AG API) and on each configuration (cancel a run) |
@@ -98,7 +98,14 @@ Things to know:
 .\scripts\patching\Disable-SqlAgPatching.ps1 -RemoveWindowsUpdatePolicy
 ```
 
-Common options for `Enable-SqlAgPatching.ps1`: `-RecurEvery 'Month Second Saturday'`, `-StartTime`, `-WindowDuration` (01:30-03:55), `-GapMinutes`, `-PreferredPrimary`, `-ExcludeKbs`.
+Common options for `Enable-SqlAgPatching.ps1`: `-RecurEvery 'Month Second Saturday'`, `-StartTime`, `-WindowDuration` (01:30-03:55), `-GapMinutes`, `-PreferredPrimary`, `-ExcludeKbs`, `-FirstNode`/`-SecondNode`, `-ConfigNames` (names for wave 1 and wave 2; the AG's configurations with other names are replaced, because Azure can't rename a configuration).
+
+This environment was set up with:
+
+```powershell
+.\scripts\patching\Enable-SqlAgPatching.ps1 -FirstNode SQL-VM-1 -SecondNode SQL-VM-2 -ConfigNames sql-update-wave1,sql-update-wave2 `
+    -RecurEvery 1Day -StartTime 14:30 -GapMinutes 90
+```
 
 | To check | Where |
 |----------|-------|

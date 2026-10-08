@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+requiredVersions:
+    azd: '>=1.27.1'
+    extensions:
+        azure.ai.agents: '>=1.0.0-beta.9'
+name: sql-ha-agent
+hooks:
+    # Ship the shared sqlha core library and the SKILL.md files the VS Code agent uses (.github/skills) with the hosted agent.
+    predeploy:
+        shell: pwsh
+        run: ./scripts/sync-agent.ps1
+        continueOnError: false
+services:
+    sql-ha-agent:
+        project: src/sql-ha-agent
+        host: azure.ai.agent
+        language: python
+        uses:
+            - ai-project
+        env:
+            AZURE_AI_MODEL_DEPLOYMENT_NAME: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+            SQLHA_SUBSCRIPTION_IDS: ${SQLHA_SUBSCRIPTION_IDS}
+            SQLHA_RESOURCE_GROUPS: ${SQLHA_RESOURCE_GROUPS}
+            SQLHA_ENABLE_WRITE_ACTIONS: ${SQLHA_ENABLE_WRITE_ACTIONS}
+            SQLHA_WRITE_APPROVAL_MODE: ${SQLHA_WRITE_APPROVAL_MODE}
+        codeConfiguration:
+            dependencyResolution: remote_build
+            entryPoint: main.py
+            runtime: python_3_13
+        container:
+            resources:
+                cpu: "0.5"
+                memory: 1Gi
+        description: Monitors, patches and reports on SQL Server Always On availability groups running on AWS and managed through Azure Arc, Azure Update Manager and Defender for Cloud.
+        kind: hosted
+        metadata:
+            tags:
+                - Agent Framework
+                - Azure Arc
+                - SQL Server
+                - Azure Update Manager
+                - Responses Protocol
+        name: sql-ha-agent
+        protocols:
+            - protocol: responses
+              version: 2.0.0
+    ai-project:
+        host: azure.ai.project
+        deployments: []
+        endpoint: https://aiservices7jz4.services.ai.azure.com/api/projects/project7jz4
+infra:
+    provider: microsoft.foundry
